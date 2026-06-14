@@ -9,8 +9,11 @@ import pygame
 import sys
 import threading
 import copy
-from board import CBoard, Color, PieceType
-from search import Search
+from pathlib import Path
+from engine.board import CBoard, Color, PieceType
+from engine.search import Search
+
+ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
 
 SQUARE_SIZE = 80
 PIECE_SIZE  = int(SQUARE_SIZE * 0.8)
@@ -42,8 +45,8 @@ def load_assets():
     }
     for color in Color:
         for piece in PieceType:
-            filename = f"assets/{color_chars[color]}_{piece_chars[piece]}_png_1024px.png"
-            img = pygame.image.load(filename).convert_alpha()
+            filename = ASSETS_DIR / f"{color_chars[color]}_{piece_chars[piece]}_png_1024px.png"
+            img = pygame.image.load(str(filename)).convert_alpha()
             IMAGES[(color, piece)] = pygame.transform.smoothscale(img, (PIECE_SIZE, PIECE_SIZE))
 
 

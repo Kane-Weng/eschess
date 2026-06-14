@@ -26,10 +26,10 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "python"))
 
-from board import CBoard, Color, PieceType, STARTPOS_FEN, bits_to_squares  # noqa: E402
-from uci import move_to_uci, uci_to_move                                   # noqa: E402
+from engine.board import CBoard, Color, PieceType, STARTPOS_FEN, bits_to_squares  # noqa: E402
+from uci import move_to_uci, uci_to_move                                          # noqa: E402
 
 
 class UCIProcess:

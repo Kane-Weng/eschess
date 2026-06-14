@@ -57,4 +57,4 @@ RUN uv sync --frozen
 
 # Default to the UCI engine on stdin/stdout; override to run the benchmark, e.g.
 #   docker run --rm eschess harness/benchmark.sh 100 100 1320
-CMD ["python", "uci.py"]
+CMD ["python", "python/uci.py"]

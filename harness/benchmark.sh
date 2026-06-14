@@ -26,7 +26,7 @@ fi
 
 echo "Eschess vs Stockfish(Elo ${SF_ELO}) — ${GAMES} games @ ${MOVETIME}ms/move"
 python "${REPO_DIR}/harness/match.py" \
-    --engine1 "python ${REPO_DIR}/uci.py" --name1 Eschess \
+    --engine1 "python ${REPO_DIR}/python/uci.py" --name1 Eschess \
     --engine2 "stockfish"                 --name2 "SF-${SF_ELO}" \
     --opt2 UCI_LimitStrength=true --opt2 "UCI_Elo=${SF_ELO}" \
     --games "${GAMES}" --movetime "${MOVETIME}" \

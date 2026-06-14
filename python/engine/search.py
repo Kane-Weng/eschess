@@ -14,9 +14,9 @@ Alpha-beta minimax search with:
 import time
 from collections.abc import Callable
 
-from board import CBoard, Color, PieceType, bits_to_squares
-from evaluate import BaseEvaluate, MediumEvaluate
-from transposition import TranspositionTable, TTFlag
+from .board import CBoard, Color, PieceType, bits_to_squares
+from .evaluate import BaseEvaluate, MediumEvaluate
+from .transposition import TranspositionTable, TTFlag
 
 PROMO_PIECES = [PieceType.QUEEN, PieceType.ROOK, PieceType.BISHOP, PieceType.KNIGHT]
 

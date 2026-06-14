@@ -20,8 +20,8 @@ Run:  python3 uci.py     (or: uv run python uci.py)
 
 import sys
 
-from board import CBoard, Color, PieceType, STARTPOS_FEN, square_name, name_to_square
-from search import Search
+from engine.board import CBoard, Color, PieceType, STARTPOS_FEN, square_name, name_to_square
+from engine.search import Search
 
 ENGINE_NAME   = "Eschess"
 ENGINE_AUTHOR = "Kane Weng"

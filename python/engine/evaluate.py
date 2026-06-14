@@ -10,7 +10,7 @@ Evaluation functions. three levels behind a common interface.
 """
 
 from abc import ABC, abstractmethod
-from board import (
+from .board import (
     CBoard, Color, PieceType, bits_to_squares,
     FILE_A, FULL_BOARD,
 )

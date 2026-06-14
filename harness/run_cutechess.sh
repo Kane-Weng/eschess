@@ -26,7 +26,7 @@ for tool in cutechess-cli stockfish; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         echo "error: '$tool' not found on PATH." >&2
         echo "       Use the Docker image (it bundles this tool) or the pure-Python path:" >&2
-        echo "       python harness/match.py --engine1 \"python3 uci.py\" \\" >&2
+        echo "       python harness/match.py --engine1 \"python3 python/uci.py\" \\" >&2
         echo "           --engine2 stockfish --opt2 UCI_LimitStrength=true --opt2 UCI_Elo=${SF_ELO} \\" >&2
         echo "           --games ${GAMES} --movetime 100 \\" >&2
         echo "           --openings harness/openings.epd --pgn results.pgn" >&2
@@ -37,7 +37,7 @@ done
 echo "Eschess vs Stockfish(Elo ${SF_ELO}) — ${GAMES} games @ tc=${TC}"
 
 cutechess-cli \
-    -engine name=Eschess cmd=python3 arg="${REPO_DIR}/uci.py" dir="${REPO_DIR}" proto=uci \
+    -engine name=Eschess cmd=python3 arg="${REPO_DIR}/python/uci.py" dir="${REPO_DIR}" proto=uci \
     -engine name="SF-${SF_ELO}" cmd=stockfish proto=uci \
         option.UCI_LimitStrength=true option."UCI_Elo=${SF_ELO}" \
     -each tc="${TC}" \
