@@ -20,7 +20,7 @@ FPS = 60
 
 PLAYER_COLOR = Color.WHITE
 BOT_COLOR    = Color.BLACK
-BOT_DEPTH    = 4
+BOT_DEPTH    = 3
 
 LIGHT_SQ   = pygame.Color(240, 217, 181)
 DARK_SQ    = pygame.Color(181, 136,  99)

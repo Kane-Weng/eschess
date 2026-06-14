@@ -8,6 +8,7 @@ Chess board backend: representation, move generation, validation, game state.
 from enum import IntEnum, auto
 from collections.abc import Iterator
 from dataclasses import dataclass
+import random as _random
 
 class Square(IntEnum):
     """
@@ -92,9 +93,9 @@ def bits_to_squares(bits: U64) -> Iterator[int]:
 """
 == Compass Rose for LERF mapping ==
           +7    +8    +9
-              \  |  /
+              \\  |  /
           -1 <-  0 -> +1
-              /  |  \
+              /  |  \\
           -9    -8    -7
 ===================================
 """
@@ -118,6 +119,21 @@ def knight_attacks(bits: U64) -> U64:
     return ((h1 << 16) | (h1 >> 16) | (h2 << 8) | (h2 >> 8)) & FULL_BOARD
 
 
+# ── Zobrist hashing ─────────────────────────────────────────────────────────
+_rng = _random.Random(0xCAFEBABE)  # fixed seed → reproducible keys
+
+def _r64() -> int: return _rng.getrandbits(64)
+
+# Initialization: 
+# - 1  number for each piece at each square
+# - 1  number to indicate the side to move is black
+# - 16 numbers to indicate castling rights
+# - 8  numbers to indicate the file of a valid en-passant square
+_ZOB_PIECE   = [[[_r64() for _ in range(64)] for _ in range(6)] for _ in range(2)]
+_ZOB_TURN    = _r64()
+_ZOB_CASTLE  = [_r64() for _ in range(16)]
+_ZOB_EP      = [_r64() for _ in range(8)]   
+
 # ── Move record ─────────────────────────────────────────────────────────────
 
 @dataclass
@@ -135,6 +151,7 @@ class Move:
     prev_en_passant_square: int | None = None
     prev_castling_rights: int = 0b1111
     prev_halfmove_clock: int = 0
+    prev_zobrist_key: int = 0
 
 
 class CBoard:
@@ -156,6 +173,7 @@ class CBoard:
         self.move_history: list[Move] = []
         self.game_over: bool = False
         self.winner: Color | None = None  # None = stalemate
+        self.zobrist_key: int = self._compute_zobrist()
 
     # ── Square helpers ──────────────────────────────────────────────────────
 
@@ -190,6 +208,23 @@ class CBoard:
         self.pieces[PieceType.ROOK]   = 0x8100000000000081
         self.pieces[PieceType.QUEEN]  = 0x0800000000000008
         self.pieces[PieceType.KING]   = 0x1000000000000010
+
+    def _compute_zobrist(self) -> int:
+        """
+        Gets the Zobrist hash code of a certain position by 
+        xoring all random numbers linked to the initial position
+        """
+        key = 0
+        for color in Color:
+            for pt in PieceType:
+                for sq in bits_to_squares(self.get_specific_pieces(color, pt)):
+                    key ^= _ZOB_PIECE[color][pt][sq]
+        if self.turn == Color.BLACK:
+            key ^= _ZOB_TURN
+        key ^= _ZOB_CASTLE[self.castling_rights & 0xF]
+        if self.en_passant_square is not None:
+            key ^= _ZOB_EP[self.en_passant_square % 8]
+        return key
 
     # ── Piece queries ───────────────────────────────────────────────────────
 
@@ -377,6 +412,7 @@ class CBoard:
             prev_en_passant_square=self.en_passant_square,
             prev_castling_rights=self.castling_rights,
             prev_halfmove_clock=self.halfmove_clock,
+            prev_zobrist_key=self.zobrist_key,
         )
 
         # Remove captured piece (normal capture)
@@ -437,6 +473,7 @@ class CBoard:
         if color == Color.BLACK:
             self.fullmove += 1
         self.turn = color.opponent()
+        self.zobrist_key = self._compute_zobrist()
 
     def unmake_move(self):
         if not self.move_history:
@@ -475,6 +512,7 @@ class CBoard:
         self.en_passant_square = move.prev_en_passant_square
         self.castling_rights   = move.prev_castling_rights
         self.halfmove_clock    = move.prev_halfmove_clock
+        self.zobrist_key       = move.prev_zobrist_key
         if color == Color.BLACK:
             self.fullmove -= 1
 
