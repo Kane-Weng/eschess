@@ -49,7 +49,7 @@ class PieceType(IntEnum):
 
 U64 = int  # Type alias for readability
 
-# ── Castling rights bitmask: bit 3=WK, 2=WQ, 1=BK, 0=BQ ───────────────────
+# ── Castling rights bitmask ─────────────────────────────────────────────────
 CR_WK = 0b1000
 CR_WQ = 0b0100
 CR_BK = 0b0010
@@ -60,13 +60,13 @@ FULL_BOARD: U64 = 0xFFFFFFFFFFFFFFFF
 
 FILE_A:  U64 = 0x0101010101010101
 FILE_H:  U64 = 0x8080808080808080
-FILE_AB: U64 = FILE_A | (FILE_A << 1)   # 0x0303030303030303
-FILE_GH: U64 = FILE_H | (FILE_H >> 1)   # 0xC0C0C0C0C0C0C0C0
+FILE_AB: U64 = FILE_A | (FILE_A << 1)
+FILE_GH: U64 = FILE_H | (FILE_H >> 1)  
 
-NOT_FILE_A:  U64 = FULL_BOARD ^ FILE_A   # 0xFEFEFEFEFEFEFEFE
-NOT_FILE_H:  U64 = FULL_BOARD ^ FILE_H   # 0x7F7F7F7F7F7F7F7F
-NOT_FILE_AB: U64 = FULL_BOARD ^ FILE_AB  # 0xFCFCFCFCFCFCFCFC
-NOT_FILE_GH: U64 = FULL_BOARD ^ FILE_GH  # 0x3F3F3F3F3F3F3F3F
+NOT_FILE_A:  U64 = FULL_BOARD ^ FILE_A  
+NOT_FILE_H:  U64 = FULL_BOARD ^ FILE_H 
+NOT_FILE_AB: U64 = FULL_BOARD ^ FILE_AB 
+NOT_FILE_GH: U64 = FULL_BOARD ^ FILE_GH 
 
 RANK_1: U64 = 0x00000000000000FF
 RANK_2: U64 = 0x000000000000FF00
@@ -89,7 +89,15 @@ def bits_to_squares(bits: U64) -> Iterator[int]:
         bits &= bits - 1
 
 # ── Directional shift functions (wrap-safe) ─────────────────────────────────
-
+"""
+== Compass Rose for LERF mapping ==
+          +7    +8    +9
+              \  |  /
+          -1 <-  0 -> +1
+              /  |  \
+          -9    -8    -7
+===================================
+"""
 def shift_n(bits: U64)  -> U64: return (bits << 8) & FULL_BOARD
 def shift_s(bits: U64)  -> U64: return  bits >> 8
 def shift_e(bits: U64)  -> U64: return (bits & NOT_FILE_H) << 1
@@ -101,12 +109,12 @@ def shift_sw(bits: U64) -> U64: return  (bits & NOT_FILE_A) >> 9
 
 def knight_attacks(bits: U64) -> U64:
     """All squares a knight can reach from any set bit in bits."""
-    l1 = (bits >> 1) & NOT_FILE_H   # one file west
-    l2 = (bits >> 2) & NOT_FILE_GH  # two files west
-    r1 = (bits << 1) & NOT_FILE_A   # one file east
-    r2 = (bits << 2) & NOT_FILE_AB  # two files east
-    h1 = l1 | r1                    # ±1 file
-    h2 = l2 | r2                    # ±2 files
+    l1 = (bits >> 1) & NOT_FILE_H   
+    l2 = (bits >> 2) & NOT_FILE_GH 
+    r1 = (bits << 1) & NOT_FILE_A  
+    r2 = (bits << 2) & NOT_FILE_AB  
+    h1 = l1 | r1
+    h2 = l2 | r2
     return ((h1 << 16) | (h1 >> 16) | (h2 << 8) | (h2 >> 8)) & FULL_BOARD
 
 
@@ -131,7 +139,7 @@ class Move:
 
 class CBoard:
     """
-    Chess board — pure logic layer.
+    Chess board: pure logic layer.
     Board state, move generation, legal filtering, make/unmake, check/mate detection.
     """
 
@@ -142,7 +150,7 @@ class CBoard:
 
         self.turn: Color = Color.WHITE
         self.en_passant_square: int | None = None
-        self.castling_rights: int = CR_WK | CR_WQ | CR_BK | CR_BQ
+        self.castling_rights: int = 0b1111
         self.halfmove_clock: int = 0
         self.fullmove: int = 1
         self.move_history: list[Move] = []
@@ -232,7 +240,7 @@ class CBoard:
             if bits & friendly:
                 break
             result |= bits
-            if bits & occ:  # Captured an enemy — include square, then stop
+            if bits & occ:
                 break
         return result
 

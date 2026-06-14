@@ -7,18 +7,27 @@ Main execution file for a chess game using pygame.
 
 import pygame
 import sys
+import threading
+import copy
 from board import CBoard, Color, PieceType
+from search import Search
 
 SQUARE_SIZE = 80
 PIECE_SIZE  = int(SQUARE_SIZE * 0.8)
-WIDTH = HEIGHT = SQUARE_SIZE * 8
+WIDTH       = SQUARE_SIZE * 8
+HEIGHT      = SQUARE_SIZE * 8 + 36   # extra strip for status bar
 FPS = 60
+
+PLAYER_COLOR = Color.WHITE
+BOT_COLOR    = Color.BLACK
+BOT_DEPTH    = 4
 
 LIGHT_SQ   = pygame.Color(240, 217, 181)
 DARK_SQ    = pygame.Color(181, 136,  99)
 HIGHLIGHT  = (255, 255,   0, 140)  # yellow, semi-transparent
 DOT_COLOR  = (  0,   0,   0, 150)  # black dot, semi-transparent
 CAPTURE_RG = (180,   0,   0, 120)  # red ring on capturable squares
+STATUS_BG  = (30,  30,  30, 220)
 
 IMAGES: dict[tuple[Color, PieceType], pygame.Surface] = {}
 
@@ -153,6 +162,30 @@ def draw_game_over(screen: pygame.Surface, board: CBoard):
     screen.blit(sub,  sub.get_rect(center=(WIDTH // 2, HEIGHT // 2 + 36)))
 
 
+def draw_status(screen: pygame.Surface, board: CBoard, bot_thinking: bool):
+    """Status bar rendered below the board."""
+    bar = pygame.Surface((WIDTH, 36), pygame.SRCALPHA)
+    bar.fill(STATUS_BG)
+    screen.blit(bar, (0, SQUARE_SIZE * 8))
+
+    if board.game_over:
+        return  # game-over overlay covers this
+
+    font = pygame.font.SysFont(None, 28)
+    if bot_thinking:
+        msg = "Bot is thinking..."
+        color = (200, 200, 100)
+    elif board.turn == PLAYER_COLOR:
+        msg = "Your turn  (White)"
+        color = (220, 220, 220)
+    else:
+        msg = "Bot's turn  (Black)"
+        color = (160, 160, 255)
+
+    text = font.render(msg, True, color)
+    screen.blit(text, (10, SQUARE_SIZE * 8 + 8))
+
+
 def main():
     pygame.init()
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
@@ -161,27 +194,63 @@ def main():
 
     board = CBoard()
     load_assets()
+    search = Search()
 
     selected_sq: int | None = None
     legal_mask: int = 0
-    # Promotion state: pending move waiting for piece choice
-    promo_pending: tuple[int, int] | None = None   # (from_sq, to_sq)
+    promo_pending: tuple[int, int] | None = None
     promo_rects: list[tuple[pygame.Rect, PieceType]] = []
+
+    # Bot state: mutated from background thread via dict to avoid nonlocal rebinding
+    bot: dict = {"thinking": False, "move": None}
+
+    def _check_game_over():
+        if board.is_checkmate():
+            board.game_over = True
+            board.winner = board.turn.opponent()
+        elif board.is_stalemate():
+            board.game_over = True
+            board.winner = None
+
+    def _trigger_bot():
+        if board.game_over or board.turn != BOT_COLOR:
+            return
+        bot["thinking"] = True
+        board_copy = copy.deepcopy(board)
+
+        def _run():
+            bot["move"] = search.get_best_move(board_copy, BOT_DEPTH)
+            bot["thinking"] = False
+
+        # Daemon thread: auto terminates as all non-daemon threads finish
+        threading.Thread(target=_run, daemon=True).start()
 
     running = True
     while running:
+        # Apply bot move when the background thread has finished
+        if not bot["thinking"] and bot["move"] is not None and not board.game_over:
+            from_square, to_square, promotion = bot["move"]
+            bot["move"] = None
+            board.make_move(from_square, to_square, promotion)
+            _check_game_over()
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
 
             elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_r:
+                if event.key == pygame.K_r and not bot["thinking"]:
                     board = CBoard()
-                    selected_sq = None
-                    legal_mask  = 0
+                    selected_sq   = None
+                    legal_mask    = 0
                     promo_pending = None
+                    bot["move"]   = None
 
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                # Block all clicks while the bot is computing or it's not the player's turn
+                if bot["thinking"] or board.turn != PLAYER_COLOR:
+                    continue
+
                 if promo_pending is not None:
                     for rect, pt in promo_rects:
                         if rect.collidepoint(event.pos):
@@ -189,12 +258,8 @@ def main():
                             promo_pending = None
                             selected_sq   = None
                             legal_mask    = 0
-                            if board.is_checkmate():
-                                board.game_over = True
-                                board.winner = board.turn.opponent()
-                            elif board.is_stalemate():
-                                board.game_over = True
-                                board.winner = None
+                            _check_game_over()
+                            _trigger_bot()
                     continue
 
                 if board.game_over:
@@ -217,12 +282,8 @@ def main():
                             board.make_move(selected_sq, clicked_sq)
                             selected_sq = None
                             legal_mask  = 0
-                            if board.is_checkmate():
-                                board.game_over = True
-                                board.winner = board.turn.opponent()
-                            elif board.is_stalemate():
-                                board.game_over = True
-                                board.winner = None
+                            _check_game_over()
+                            _trigger_bot()
                     else:
                         info = board.get_piece_at(clicked_sq)
                         if info and info[0] == board.turn:
@@ -239,11 +300,12 @@ def main():
             draw_move_dots(screen, board, legal_mask)
 
         if promo_pending is not None:
-            promo_color = board.turn 
-            promo_rects = draw_promotion_picker(screen, promo_color)
+            promo_rects = draw_promotion_picker(screen, PLAYER_COLOR)
 
         if board.game_over:
             draw_game_over(screen, board)
+
+        draw_status(screen, board, bot["thinking"])
 
         pygame.display.flip()
         clock.tick(FPS)
