@@ -4,10 +4,11 @@ Author: Kane Weng
 
 Alpha-beta minimax search with:
   - Transposition table (TT) with Zobrist keys
-  - Iterative deepening (primes TT for better move ordering at each depth)
+  - Iterative deepening
+  - Quiescence search at depth 0 (avoids horizon effect)
   - Move ordering: TT best move > promotions > MVV-LVA captures > killers > history
   - Killer heuristic: 2 quiet moves per ply that caused beta cutoffs
-  - History heuristic: accumulated score for quiet moves that caused cutoffs
+  - History heuristic with gravity formula (self-bounding, aging between searches)
 """
 
 from board import CBoard, Color, PieceType, bits_to_squares
@@ -16,7 +17,9 @@ from transposition import TranspositionTable, TTFlag
 
 PROMO_PIECES = [PieceType.QUEEN, PieceType.ROOK, PieceType.BISHOP, PieceType.KNIGHT]
 
-_MAX_PLY = 64
+_MAX_PLY     = 64
+_MAX_HISTORY = 16_384   # gravity ceiling; scores are bounded to [-MAX, +MAX]
+_QS_DEPTH    = 8        # quiescence safety limit
 
 # Centipawn values for MVV-LVA ordering
 _CP = {
@@ -27,13 +30,23 @@ _CP = {
 Move = tuple[int, int, PieceType | None]  # (from_square, to_square, promotion)
 
 
-def _flat_moves(board: CBoard) -> list[Move]:
-    """Expand (square, legal_bits) pairs into individual (from, to, promo) triples."""
+def _flat_moves(board: CBoard, captures_only: bool = False) -> list[Move]:
+    """
+    Expand legal moves into (from, to, promo) triples.
+    If captures_only=True, include only captures and queen promotions (for quiescence).
+    """
+    occ   = board.occupied()
     moves: list[Move] = []
     for from_square, legal_bits in board.get_all_legal_moves():
         for to_square in bits_to_squares(legal_bits):
-            if board.needs_promotion(from_square, to_square):
-                for promo in PROMO_PIECES:
+            is_capture = bool(occ & (1 << to_square))
+            is_promo   = board.needs_promotion(from_square, to_square)
+            if captures_only and not is_capture and not is_promo:
+                continue
+            if is_promo:
+                # In quiescence only generate queen promotions (under-promos are noise)
+                promos = [PieceType.QUEEN] if captures_only else PROMO_PIECES
+                for promo in promos:
                     moves.append((from_square, to_square, promo))
             else:
                 moves.append((from_square, to_square, None))
@@ -48,9 +61,25 @@ class Search:
         self._history:  list[list[list[int]]]  = [[[0] * 64 for _ in range(64)] for _ in range(2)]
 
     def new_game(self) -> None:
-        """Reset search state between games (keeps TT for opening book effect)."""
+        """Reset search state between games (TT persists for transposition reuse)."""
         self._killers = [[None, None] for _ in range(_MAX_PLY)]
         self._history = [[[0] * 64 for _ in range(64)] for _ in range(2)]
+
+    # ── History helpers ──────────────────────────────────────────────────────
+
+    def _update_history(self, color: int, from_square: int, to_square: int, depth: int) -> None:
+        """
+        Gravity formula: pulls score toward the bonus without overflow.
+        The -current * |bonus| / MAX term shrinks updates as score approaches the ceiling.
+        """
+        bonus   = min(depth * depth, _MAX_HISTORY)
+        clamped = max(-_MAX_HISTORY, min(_MAX_HISTORY, bonus))
+        cur     = self._history[color][from_square][to_square]
+        self._history[color][from_square][to_square] += clamped - cur * abs(clamped) // _MAX_HISTORY
+
+    def _age_history(self) -> None:
+        """Halve all history scores so recent cutoffs outweigh stale ones."""
+        self._history = [[[v >> 1 for v in row] for row in color] for color in self._history]
 
     # ── Move ordering ────────────────────────────────────────────────────────
 
@@ -58,23 +87,73 @@ class Search:
         if move == tt_move:
             return 20_000
 
-        from_sq, to_sq, promotion = move
+        from_square, to_square, promotion = move
 
         if promotion == PieceType.QUEEN:
             return 10_000
         if promotion is not None:
             return 9_000
 
-        captured = board.get_piece_at(to_sq)
+        captured = board.get_piece_at(to_square)
         if captured is not None:
-            aggressor = board.get_piece_at(from_sq)
+            aggressor = board.get_piece_at(from_square)
             agg_val   = _CP.get(aggressor[1], 0) if aggressor else 0
             return 5_000 + _CP.get(captured[1], 0) * 10 - agg_val
 
         # Quiet move: killers then history
         if self._killers[ply][0] == move: return 4_000
         if self._killers[ply][1] == move: return 3_000
-        return self._history[board.turn.value][from_sq][to_sq]
+        return self._history[board.turn.value][from_square][to_square]
+
+    # ── Quiescence search ────────────────────────────────────────────────────
+
+    def _quiescence(self, board: CBoard, alpha: float, beta: float, qdepth: int = 0) -> float:
+        """
+        Extend search at depth 0 with captures only until the position is quiet.
+        Stand-pat score lets the side to move 'do nothing' (lower bound on the position).
+        """
+        stand_pat   = self._evaluate.evaluate(board)
+        maximizing  = board.turn == Color.WHITE
+
+        if maximizing:
+            if stand_pat >= beta:
+                return stand_pat        # beta cutoff: too good for White, Black avoids
+            if stand_pat > alpha:
+                alpha = stand_pat
+        else:
+            if stand_pat <= alpha:
+                return stand_pat        # alpha cutoff: too bad for White, White avoids
+            if stand_pat < beta:
+                beta = stand_pat
+
+        if qdepth >= _QS_DEPTH:        # safety valve against tactical explosions
+            return stand_pat
+
+        captures = _flat_moves(board, captures_only=True)
+        # MVV: order by value of captured piece (no LVA needed in QS)
+        captures.sort(
+            key=lambda m: _CP.get(board.get_piece_at(m[1])[1], 0) if board.get_piece_at(m[1]) else 0,
+            reverse=True,
+        )
+
+        for move in captures:
+            from_square, to_square, promotion = move
+            board.make_move(from_square, to_square, promotion)
+            score = self._quiescence(board, alpha, beta, qdepth + 1)
+            board.unmake_move()
+
+            if maximizing:
+                if score > alpha:
+                    alpha = score
+                if alpha >= beta:
+                    return alpha        # beta cutoff
+            else:
+                if score < beta:
+                    beta = score
+                if beta <= alpha:
+                    return beta         # alpha cutoff
+
+        return alpha if maximizing else beta
 
     # ── Core search ──────────────────────────────────────────────────────────
 
@@ -86,7 +165,7 @@ class Search:
         beta:  float =  99_999,
         ply:   int   = 0,
     ) -> tuple[float, Move | None]:
-        """Alpha-beta minimax. Score is from White's perspective."""
+        """Alpha-beta minimax. Score is always from White's perspective."""
         orig_alpha = alpha
 
         # TT probe
@@ -110,9 +189,7 @@ class Search:
             return 0.0, None  # stalemate
 
         if depth == 0:
-            score = self._evaluate.evaluate(board)
-            self._tt.store(key, 0, TTFlag.EXACT, score, None)
-            return score, None
+            return self._quiescence(board, alpha, beta), None
 
         legal_moves.sort(key=lambda m: self._order_key(board, m, ply, tt_move), reverse=True)
 
@@ -142,7 +219,7 @@ class Search:
                     if self._killers[ply][0] != move:
                         self._killers[ply][1] = self._killers[ply][0]
                         self._killers[ply][0] = move
-                    self._history[board.turn.value][from_square][to_square] += depth * depth
+                    self._update_history(board.turn.value, from_square, to_square, depth)
                 break
 
         # Store result in TT
@@ -158,6 +235,7 @@ class Search:
     def get_best_move(self, board: CBoard, depth: int = 3) -> Move | None:
         """Iterative deepening search; returns (from, to, promo) for the current player."""
         self._killers = [[None, None] for _ in range(_MAX_PLY)]
+        self._age_history()     # decay stale scores before each new search
         best_move: Move | None = None
         for d in range(1, depth + 1):
             _, move = self.minimax(board, d)
