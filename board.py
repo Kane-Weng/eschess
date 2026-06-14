@@ -56,6 +56,15 @@ CR_WQ = 0b0100
 CR_BK = 0b0010
 CR_BQ = 0b0001
 
+# ── FEN piece characters ────────────────────────────────────────────────────
+_PIECE_TO_FEN: dict[PieceType, str] = {
+    PieceType.PAWN: 'p', PieceType.KNIGHT: 'n', PieceType.BISHOP: 'b',
+    PieceType.ROOK: 'r', PieceType.QUEEN: 'q', PieceType.KING: 'k',
+}
+_FEN_TO_PIECE: dict[str, PieceType] = {v: k for k, v in _PIECE_TO_FEN.items()}
+
+STARTPOS_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+
 # ── Board constants ─────────────────────────────────────────────────────────
 FULL_BOARD: U64 = 0xFFFFFFFFFFFFFFFF
 
@@ -88,6 +97,19 @@ def bits_to_squares(bits: U64) -> Iterator[int]:
         lsb = bits & -bits
         yield lsb.bit_length() - 1
         bits &= bits - 1
+
+# ── Square / algebraic name conversion (for UCI / FEN) ──────────────────────
+_FILE_CHARS = "abcdefgh"
+
+def square_name(square: int) -> str:
+    """0-63 square index → algebraic coordinate, e.g. 12 → 'e2'."""
+    return f"{_FILE_CHARS[square % 8]}{square // 8 + 1}"
+
+def name_to_square(name: str) -> int:
+    """Algebraic coordinate → 0-63 square index, e.g. 'e2' → 12."""
+    file_idx = ord(name[0]) - ord('a')
+    rank_idx = int(name[1]) - 1
+    return 8 * rank_idx + file_idx
 
 # ── Directional shift functions (wrap-safe) ─────────────────────────────────
 """
@@ -208,6 +230,78 @@ class CBoard:
         self.pieces[PieceType.ROOK]   = 0x8100000000000081
         self.pieces[PieceType.QUEEN]  = 0x0800000000000008
         self.pieces[PieceType.KING]   = 0x1000000000000010
+
+    # ── FEN serialization ───────────────────────────────────────────────────
+
+    @classmethod
+    def from_fen(cls, fen: str) -> "CBoard":
+        """Construct a board from a FEN string."""
+        board = cls()
+        board.set_fen(fen)
+        return board
+
+    def set_fen(self, fen: str) -> None:
+        """Reset board state to the position described by a FEN string."""
+        parts = fen.split()
+        if len(parts) < 4:
+            raise ValueError(f"Invalid FEN (need ≥4 fields): {fen!r}")
+        placement, side, castling, ep = parts[0], parts[1], parts[2], parts[3]
+
+        self.colors = [0, 0]
+        self.pieces = [0, 0, 0, 0, 0, 0]
+        rank_idx, file_idx = 7, 0
+        for ch in placement:
+            if ch == '/':
+                rank_idx -= 1
+                file_idx = 0
+            elif ch.isdigit():
+                file_idx += int(ch)
+            else:
+                color = Color.WHITE if ch.isupper() else Color.BLACK
+                self._set_piece(color, _FEN_TO_PIECE[ch.lower()], 8 * rank_idx + file_idx)
+                file_idx += 1
+
+        self.turn = Color.WHITE if side == 'w' else Color.BLACK
+        cr = 0
+        if 'K' in castling: cr |= CR_WK
+        if 'Q' in castling: cr |= CR_WQ
+        if 'k' in castling: cr |= CR_BK
+        if 'q' in castling: cr |= CR_BQ
+        self.castling_rights = cr
+        self.en_passant_square = None if ep == '-' else name_to_square(ep)
+        self.halfmove_clock = int(parts[4]) if len(parts) > 4 else 0
+        self.fullmove = int(parts[5]) if len(parts) > 5 else 1
+
+        self.move_history = []
+        self.game_over = False
+        self.winner = None
+        self.zobrist_key = self._compute_zobrist()
+
+    def to_fen(self) -> str:
+        """Serialize the current position to a FEN string."""
+        rows: list[str] = []
+        for rank_idx in range(7, -1, -1):
+            row, empty = "", 0
+            for file_idx in range(8):
+                info = self.get_piece_at(8 * rank_idx + file_idx)
+                if info is None:
+                    empty += 1
+                    continue
+                if empty:
+                    row += str(empty)
+                    empty = 0
+                color, piece_type = info
+                ch = _PIECE_TO_FEN[piece_type]
+                row += ch.upper() if color == Color.WHITE else ch
+            if empty:
+                row += str(empty)
+            rows.append(row)
+
+        side = 'w' if self.turn == Color.WHITE else 'b'
+        cr = "".join(c for bit, c in ((CR_WK, 'K'), (CR_WQ, 'Q'), (CR_BK, 'k'), (CR_BQ, 'q'))
+                     if self.castling_rights & bit) or '-'
+        ep = '-' if self.en_passant_square is None else square_name(self.en_passant_square)
+        return f"{'/'.join(rows)} {side} {cr} {ep} {self.halfmove_clock} {self.fullmove}"
 
     def _compute_zobrist(self) -> int:
         """

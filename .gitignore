@@ -1,3 +1,9 @@
 /__pycache__
 /.venv
 /.vscode
+
+# Match artifacts
+*.pgn
+
+# Internal roadmap notes
+/TASKS.md

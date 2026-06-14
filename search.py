@@ -11,6 +11,9 @@ Alpha-beta minimax search with:
   - History heuristic with gravity formula (self-bounding, aging between searches)
 """
 
+import time
+from collections.abc import Callable
+
 from board import CBoard, Color, PieceType, bits_to_squares
 from evaluate import BaseEvaluate, MediumEvaluate
 from transposition import TranspositionTable, TTFlag
@@ -59,6 +62,9 @@ class Search:
         self._tt        = TranspositionTable(tt_size_mb)
         self._killers: list[list[Move | None]] = [[None, None] for _ in range(_MAX_PLY)]
         self._history:  list[list[list[int]]]  = [[[0] * 64 for _ in range(64)] for _ in range(2)]
+        self._nodes:    int          = 0
+        self._deadline: float | None = None
+        self._stop:     bool         = False
 
     def new_game(self) -> None:
         """Reset search state between games (TT persists for transposition reuse)."""
@@ -112,7 +118,12 @@ class Search:
         Extend search at depth 0 with captures only until the position is quiet.
         Stand-pat score lets the side to move 'do nothing' (lower bound on the position).
         """
+        self._nodes += 1
+        if self._deadline is not None and (self._nodes & 255) == 0 and time.time() >= self._deadline:
+            self._stop = True
         stand_pat   = self._evaluate.evaluate(board)
+        if self._stop:
+            return stand_pat
         maximizing  = board.turn == Color.WHITE
 
         if maximizing:
@@ -166,6 +177,14 @@ class Search:
         ply:   int   = 0,
     ) -> tuple[float, Move | None]:
         """Alpha-beta minimax. Score is always from White's perspective."""
+        if self._stop:
+            return 0.0, None
+
+        self._nodes += 1
+        if self._deadline is not None and (self._nodes & 255) == 0 and time.time() >= self._deadline:
+            self._stop = True
+            return 0.0, None
+
         orig_alpha = alpha
 
         # TT probe
@@ -205,6 +224,9 @@ class Search:
             eval_score, _ = self.minimax(board, depth - 1, alpha, beta, ply + 1)
             board.unmake_move()
 
+            if self._stop:
+                return (best_eval if best_eval is not None else 0.0), best_move
+
             if maximizing:
                 if best_eval is None or eval_score > best_eval:
                     best_eval, best_move = eval_score, move
@@ -234,11 +256,82 @@ class Search:
 
     def get_best_move(self, board: CBoard, depth: int = 3) -> Move | None:
         """Iterative deepening search; returns (from, to, promo) for the current player."""
+        move, _ = self.search_position(board, max_depth=depth)
+        return move
+
+    def _first_legal_move(self, board: CBoard) -> Move | None:
+        """A guaranteed-legal move, used as a fallback when time runs out at depth 1."""
+        for from_square, legal_bits in board.get_all_legal_moves():
+            for to_square in bits_to_squares(legal_bits):
+                promo = PieceType.QUEEN if board.needs_promotion(from_square, to_square) else None
+                return (from_square, to_square, promo)
+        return None
+
+    def _extract_pv(self, board: CBoard, max_len: int = _MAX_PLY) -> list[Move]:
+        """Walk the TT from the root to recover the principal variation."""
+        pv: list[Move] = []
+        seen: set[int] = set()
+        applied = 0
+        for _ in range(max_len):
+            if board.zobrist_key in seen:
+                break          # repetition guard
+            seen.add(board.zobrist_key)
+            entry = self._tt.probe(board.zobrist_key)
+            if entry is None or entry.best_move is None:
+                break
+            from_square, to_square, promotion = entry.best_move
+            if not (board.get_legal_moves(from_square) & (1 << to_square)):
+                break          # stale/illegal TT move
+            pv.append(entry.best_move)
+            board.make_move(from_square, to_square, promotion)
+            applied += 1
+        for _ in range(applied):
+            board.unmake_move()
+        return pv
+
+    def search_position(
+        self,
+        board: CBoard,
+        max_depth: int = _MAX_PLY,
+        time_limit_ms: float | None = None,
+        info_callback: "Callable[[int, float, int, float, list[Move]], None] | None" = None,
+    ) -> tuple[Move | None, float]:
+        """
+        Iterative-deepening search with optional time budget.
+
+        Returns (best_move, score) where score is in pawn units from White's
+        perspective. info_callback(depth, score, nodes, elapsed_s, pv) is
+        invoked after each completed depth (for UCI info output).
+        """
         self._killers = [[None, None] for _ in range(_MAX_PLY)]
         self._age_history()     # decay stale scores before each new search
-        best_move: Move | None = None
-        for d in range(1, depth + 1):
-            _, move = self.minimax(board, d)
+        self._nodes = 0
+        self._stop  = False
+
+        start  = time.time()
+        budget = (time_limit_ms / 1000.0) if time_limit_ms else None
+        self._deadline = (start + budget) if budget else None
+
+        best_move:  Move | None = self._first_legal_move(board)
+        best_score: float       = 0.0
+        completed_any           = False
+
+        for d in range(1, max(1, max_depth) + 1):
+            score, move = self.minimax(board, d)
+            if self._stop:
+                if not completed_any and move is not None:
+                    best_move = move
+                break
             if move is not None:
-                best_move = move
-        return best_move
+                best_move, best_score = move, score
+                completed_any = True
+            if info_callback is not None:
+                info_callback(d, best_score, self._nodes, time.time() - start,
+                              self._extract_pv(board, d))
+            # Mate found, or not enough time left to begin another (deeper) iteration.
+            if abs(best_score) > 8_000:
+                break
+            if budget is not None and (time.time() - start) >= budget * 0.5:
+                break
+
+        return best_move, best_score

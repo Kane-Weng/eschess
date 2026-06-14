@@ -1,0 +1,13 @@
+# Host virtualenv (rebuilt inside the image by `uv sync`)
+.venv
+
+# VCS / editor / caches
+.git
+.gitignore
+.vscode
+__pycache__
+**/__pycache__
+*.pyc
+
+# Match artifacts
+*.pgn
