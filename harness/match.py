@@ -21,8 +21,10 @@ Example => Eschess vs a 1320-rated Stockfish, 100 games at 100ms/move:
 """
 
 import argparse
+import queue
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -217,47 +219,71 @@ def main() -> None:
     ap.add_argument("--max-plies", type=int, default=400, help="adjudicate a draw past this many plies")
     ap.add_argument("--openings", default=None, help="EPD/FEN opening suite (one per line)")
     ap.add_argument("--pgn", default="results.pgn")
+    ap.add_argument("--concurrency", type=int, default=1, help="number of games to play in parallel")
     args = ap.parse_args()
 
     openings = load_openings(args.openings)
     go_command = f"go movetime {args.movetime}"
+    opts1, opts2 = _parse_opts(args.opt1), _parse_opts(args.opt2)
 
-    e1 = UCIProcess(args.engine1, args.name1, _parse_opts(args.opt1))
-    e2 = UCIProcess(args.engine2, args.name2, _parse_opts(args.opt2))
+    # One queue of game indices; each worker owns its own engine pair and drains it.
+    work_q: "queue.Queue[int]" = queue.Queue()
+    for game_idx in range(args.games):
+        work_q.put(game_idx)
 
-    # Score is tracked from engine 1's perspective.
-    wins = losses = draws = 0
+    # Shared scoreboard (from engine 1's perspective), guarded by a lock together
+    # with the PGN handle since games finish out of order across workers.
+    stats = {"wins": 0, "losses": 0, "draws": 0, "done": 0}
+    lock = threading.Lock()
     started = time.time()
+    pgn = open(args.pgn, "w")
 
-    with open(args.pgn, "w") as pgn:
-        for game_idx in range(args.games):
-            opening = openings[(game_idx // 2) % len(openings)]  # same opening, both colours
-            e1_is_white = (game_idx % 2 == 0)
-            white, black = (e1, e2) if e1_is_white else (e2, e1)
+    def worker() -> None:
+        e1 = UCIProcess(args.engine1, args.name1, opts1)
+        e2 = UCIProcess(args.engine2, args.name2, opts2)
+        try:
+            while True:
+                try:
+                    game_idx = work_q.get_nowait()
+                except queue.Empty:
+                    break
+                opening = openings[(game_idx // 2) % len(openings)]  # same opening, both colours
+                e1_is_white = (game_idx % 2 == 0)
+                white, black = (e1, e2) if e1_is_white else (e2, e1)
 
-            result, moves = play_game(white, black, opening, go_command, args.max_plies)
-            write_pgn(pgn, game_idx + 1, white.name, black.name, opening, result, moves)
+                result, moves = play_game(white, black, opening, go_command, args.max_plies)
 
-            if result == "1/2-1/2":
-                draws += 1
-            elif (result == "1-0") == e1_is_white:
-                wins += 1
-            else:
-                losses += 1
+                with lock:
+                    if result == "1/2-1/2":
+                        stats["draws"] += 1
+                    elif (result == "1-0") == e1_is_white:
+                        stats["wins"] += 1
+                    else:
+                        stats["losses"] += 1
+                    stats["done"] += 1
+                    write_pgn(pgn, game_idx + 1, white.name, black.name, opening, result, moves)
+                    score = stats["wins"] + 0.5 * stats["draws"]
+                    print(f"[{stats['done']}/{args.games}] {white.name} vs {black.name}: {result}  "
+                          f"| {args.name1} +{stats['wins']} -{stats['losses']} ={stats['draws']}  "
+                          f"({score}/{stats['done']})", flush=True)
+        finally:
+            e1.close()
+            e2.close()
 
-            score = wins + 0.5 * draws
-            print(f"[{game_idx + 1}/{args.games}] {white.name} vs {black.name}: {result}  "
-                  f"| {args.name1} +{wins} -{losses} ={draws}  ({score}/{game_idx + 1})",
-                  flush=True)
-
-    e1.close()
-    e2.close()
+    num_workers = max(1, min(args.concurrency, args.games))
+    threads = [threading.Thread(target=worker) for _ in range(num_workers)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    pgn.close()
 
     n = args.games
-    score = wins + 0.5 * draws
-    print(f"\nFinished {n} games in {time.time() - started:.1f}s")
-    print(f"{args.name1}: +{wins} -{losses} ={draws}  score {score}/{n} = {score / n:.1%}")
-    print(f"PGN written to {args.pgn}  →  rate it with: python harness/elo.py {args.pgn}")
+    score = stats["wins"] + 0.5 * stats["draws"]
+    print(f"\nFinished {n} games in {time.time() - started:.1f}s  (concurrency {num_workers})")
+    print(f"{args.name1}: +{stats['wins']} -{stats['losses']} ={stats['draws']}  "
+          f"score {score}/{n} = {score / n:.1%}")
+    print(f"PGN written to {args.pgn}  ->  rate it with: python harness/elo.py {args.pgn}")
 
 
 if __name__ == "__main__":
