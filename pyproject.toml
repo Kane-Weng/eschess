@@ -13,3 +13,8 @@ nn = [
     "numpy>=1.24",
     "datasets>=2.14",
 ]
+# Cross-language telemetry plots (harness/telemetry.py). Only needed for charts;
+# the benchmark itself always writes CSV without it.
+bench = [
+    "matplotlib>=3.7",
+]

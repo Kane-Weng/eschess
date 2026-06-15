@@ -27,6 +27,23 @@ RUN git clone --depth 1 https://github.com/cutechess/cutechess.git /tmp/cc \
     && install -D -m 0755 /tmp/cc/build/cutechess-cli /out/cutechess-cli \
     && echo "=== cutechess-cli Qt runtime deps ===" && ldd /out/cutechess-cli | grep -i qt6
 
+# ── Stage 1b: build the C++ and Rust engines ─────────────────────────────────
+# The rust image already has cargo + a C++ toolchain; only cmake is missing.
+FROM rust:bookworm AS engines
+
+RUN apt-get update && apt-get install -y --no-install-recommends cmake \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+COPY cpp/ cpp/
+RUN cmake -S cpp -B cpp/build -DCMAKE_BUILD_TYPE=Release && cmake --build cpp/build -j
+
+COPY rust/ rust/
+RUN cargo build --release --manifest-path rust/Cargo.toml
+
+# Sanity-check move generation matches the reference perft counts at build time.
+RUN cpp/build/perft >/dev/null && rust/target/release/perft >/dev/null
+
 # ── Stage 2: the runtime image ───────────────────────────────────────────────
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
@@ -53,8 +70,19 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-install-project
 
 COPY . .
-RUN uv sync --frozen
+# `bench` adds matplotlib for harness/telemetry.py plots.
+RUN uv sync --frozen --extra bench
 
-# Default to the UCI engine on stdin/stdout; override to run the benchmark, e.g.
-#   docker run --rm eschess harness/benchmark.sh 100 100 1320
+# Drop the compiled C++/Rust engines at the paths the harness + GUI expect
+# (cpp/build/uci, rust/target/release/uci). Placed after `COPY . .` so the
+# source copy never shadows them.
+COPY --from=engines /src/cpp/build/uci            /app/cpp/build/uci
+COPY --from=engines /src/cpp/build/perft          /app/cpp/build/perft
+COPY --from=engines /src/rust/target/release/uci   /app/rust/target/release/uci
+COPY --from=engines /src/rust/target/release/perft /app/rust/target/release/perft
+
+# Default to the UCI engine on stdin/stdout; override to run a benchmark, e.g.
+#   docker run --rm eschess python harness/benchmark.py --a-eval medium --stockfish 1320 --games 100
+#   docker run --rm eschess python harness/telemetry.py --depth 7
+#   docker run --rm eschess python harness/acl.py <pgn> --ref stockfish --ref-depth 14
 CMD ["python", "python/uci.py"]

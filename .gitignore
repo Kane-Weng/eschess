@@ -6,8 +6,12 @@
 /cpp/build/
 build/
 
+# Rust build artifacts
+/rust/target/
+
 # Match artifacts
 *.pgn
+/harness/results/
 
 # Internal roadmap notes
 /TASKS.md

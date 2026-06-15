@@ -11,3 +11,9 @@ __pycache__
 
 # Match artifacts
 *.pgn
+harness/results/
+
+# Native build artifacts (rebuilt in the engines stage; host builds may be
+# arch-specific and rust/target is huge)
+cpp/build/
+rust/target/
