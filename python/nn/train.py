@@ -25,21 +25,27 @@ from .dataset import ChessDataset, load_hf_samples
 from .network import PolicyNet, ValueNet
 
 
-def train_policy(net: PolicyNet, dataset: ChessDataset, epochs: int = 5,
-                 batch_size: int = 64, lr: float = 1e-3, device: str = "cpu") -> None:
+def train_policy(
+    net: PolicyNet,
+    dataset: ChessDataset,
+    epochs: int = 5,
+    batch_size: int = 64,
+    lr: float = 1e-3,
+    device: str = "cpu",
+) -> None:
     net = net.to(device).train()
-    loader    = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
     optimizer = torch.optim.Adam(net.parameters(), lr=lr)
     # CrossEntropy: Choosing a chess move is a multi-class classification problem
     # It penalizes the model if it assigns low probability to high-level player's move
-    loss_fn   = nn.CrossEntropyLoss()
+    loss_fn = nn.CrossEntropyLoss()
 
     for epoch in range(epochs):
         total = 0.0
         for planes, policy_index, _value in loader:
             planes, policy_index = planes.to(device), policy_index.to(device)
             logits = net(planes)
-            loss   = loss_fn(logits, policy_index)
+            loss = loss_fn(logits, policy_index)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
@@ -47,21 +53,27 @@ def train_policy(net: PolicyNet, dataset: ChessDataset, epochs: int = 5,
         print(f"[policy] epoch {epoch + 1}/{epochs}  loss {total / len(dataset):.4f}", flush=True)
 
 
-def train_value(net: ValueNet, dataset: ChessDataset, epochs: int = 5,
-                batch_size: int = 64, lr: float = 1e-3, device: str = "cpu") -> None:
+def train_value(
+    net: ValueNet,
+    dataset: ChessDataset,
+    epochs: int = 5,
+    batch_size: int = 64,
+    lr: float = 1e-3,
+    device: str = "cpu",
+) -> None:
     net = net.to(device).train()
-    loader    = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
     optimizer = torch.optim.Adam(net.parameters(), lr=lr)
     # MSELoss: Evaluating a board state is a regression task
     # It penalizes incorrect evaluations through Mean Squared Error
-    loss_fn   = nn.MSELoss()
+    loss_fn = nn.MSELoss()
 
     for epoch in range(epochs):
         total = 0.0
         for planes, _policy_index, value in loader:
             planes, value = planes.to(device), value.to(device)
             prediction = net(planes)
-            loss       = loss_fn(prediction, value)
+            loss = loss_fn(prediction, value)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()

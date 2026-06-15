@@ -15,6 +15,11 @@
 //!   policy_prob    : (nnz,) f32          normalized MCTS visit probabilities
 //!   offsets        : (M+1,) i64          CSR row offsets into policy_index/prob
 
+// The #[pymethods] / #[pyo3(signature=…)] expansion emits a `.into()` on the PyErr
+// result that clippy (1.96) misattributes to `generate`'s return type. The code is
+// macro-generated, so item-level allows don't reach it; scope it to this module.
+#![allow(clippy::useless_conversion)]
+
 use numpy::ndarray::{Array1, Array4};
 use numpy::{IntoPyArray, PyReadonlyArray1, PyReadonlyArray2};
 use pyo3::prelude::*;
@@ -82,7 +87,12 @@ impl SelfPlayEngine {
     ) -> PyResult<PyObject> {
         let cfg = self.cfg.clone();
         let mut games: Vec<GameState> = (0..num_games)
-            .map(|i| GameState::new(StdRng::seed_from_u64(seed.wrapping_add(i as u64)), cfg.c_puct))
+            .map(|i| {
+                GameState::new(
+                    StdRng::seed_from_u64(seed.wrapping_add(i as u64)),
+                    cfg.c_puct,
+                )
+            })
             .collect();
 
         loop {

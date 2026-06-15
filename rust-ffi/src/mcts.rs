@@ -54,7 +54,13 @@ struct Node {
 
 impl Node {
     fn new(prior: f32) -> Node {
-        Node { prior, visit: 0, value_sum: 0.0, children: Vec::new(), expanded: false }
+        Node {
+            prior,
+            visit: 0,
+            value_sum: 0.0,
+            children: Vec::new(),
+            expanded: false,
+        }
     }
     fn mean_value(&self) -> f32 {
         if self.visit > 0 {
@@ -83,6 +89,7 @@ pub struct GameState {
     board: CBoard,
     rep: HashMap<u64, u16>,
     /// (planes, sparse policy target) per played ply; value filled in at the end.
+    #[allow(clippy::type_complexity)]
     pub records: Vec<(Vec<f32>, Vec<(u32, f32)>)>,
     pub finished: bool,
     pub result_white: f32,
@@ -201,7 +208,11 @@ impl GameState {
         self.nodes[leaf].children = children;
         self.nodes[leaf].expanded = true;
 
-        let stm_value = if req.leaf_turn == WHITE { value_white } else { -value_white };
+        let stm_value = if req.leaf_turn == WHITE {
+            value_white
+        } else {
+            -value_white
+        };
         backup(&mut self.nodes, &req.path, stm_value);
 
         if req.is_root {
@@ -259,7 +270,11 @@ impl GameState {
 
         if legal.is_empty() {
             // Terminal (mate/stalemate) from the leaf's perspective.
-            let value = if self.board.is_in_check(leaf_turn) { -1.0 } else { 0.0 };
+            let value = if self.board.is_in_check(leaf_turn) {
+                -1.0
+            } else {
+                0.0
+            };
             self.unwind(path.len() - 1);
             backup(&mut self.nodes, &path, value);
             return Step::Terminal;
@@ -267,7 +282,14 @@ impl GameState {
 
         let planes = encode(&self.board);
         self.unwind(path.len() - 1);
-        Step::Pending(LeafRequest { path, leaf, legal, leaf_turn, is_root: false, planes })
+        Step::Pending(LeafRequest {
+            path,
+            leaf,
+            legal,
+            leaf_turn,
+            is_root: false,
+            planes,
+        })
     }
 
     fn select_child(&self, node: usize) -> (MoveKey, usize) {
@@ -291,7 +313,8 @@ impl GameState {
     fn finish_ply(&mut self, cfg: &Cfg) {
         // Visit counts of the root's children become the training policy target.
         let mut total: u32 = 0;
-        let mut counts: Vec<(MoveKey, u32)> = Vec::with_capacity(self.nodes[self.root].children.len());
+        let mut counts: Vec<(MoveKey, u32)> =
+            Vec::with_capacity(self.nodes[self.root].children.len());
         for &(mk, child) in &self.nodes[self.root].children {
             let v = self.nodes[child].visit;
             total += v;
@@ -306,9 +329,14 @@ impl GameState {
                 }
             }
         }
-        self.records.push((std::mem::take(&mut self.root_planes), target));
+        self.records
+            .push((std::mem::take(&mut self.root_planes), target));
 
-        let temp = if self.move_num < cfg.temp_moves { cfg.temperature } else { 0.0 };
+        let temp = if self.move_num < cfg.temp_moves {
+            cfg.temperature
+        } else {
+            0.0
+        };
         let (from, to) = self.select_move(&counts, temp);
         let promo = if self.board.needs_promotion(from as i32, to as i32) {
             QUEEN as i32

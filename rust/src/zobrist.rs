@@ -30,10 +30,10 @@ static TABLES: OnceLock<Tables> = OnceLock::new();
 
 pub fn tables() -> &'static Tables {
     TABLES.get_or_init(|| {
-        let mut rng = SplitMix64 {
-            state: 0xCAFE_BABE,
-        };
+        let mut rng = SplitMix64 { state: 0xCAFE_BABE };
         let mut piece = [[[0u64; 64]; 6]; 2];
+        // Index-based nested fill mirrors the Python/C++ ports' table init order.
+        #[allow(clippy::needless_range_loop)]
         for c in 0..2 {
             for p in 0..6 {
                 for s in 0..64 {

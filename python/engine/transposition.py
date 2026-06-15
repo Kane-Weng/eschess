@@ -2,26 +2,27 @@
 Date created: Jun 14
 Author: Kane Weng
 
-Transposition Table, database that stores results of previously performed searches, using Zobrist Hashing.
+Transposition Table, database that stores results of previously performed
+searches, using Zobrist Hashing.
 """
 
 from enum import IntEnum
 
 
 class TTFlag(IntEnum):
-    EXACT = 0   # score is exact
-    LOWER = 1   # beta cutoff: score is a lower bound
-    UPPER = 2   # failed low: score is an upper bound
+    EXACT = 0  # score is exact
+    LOWER = 1  # beta cutoff: score is a lower bound
+    UPPER = 2  # failed low: score is an upper bound
 
 
 class TTEntry:
     __slots__ = ("key", "depth", "flag", "score", "best_move")
 
     def __init__(self, key: int, depth: int, flag: TTFlag, score: float, best_move):
-        self.key       = key
-        self.depth     = depth
-        self.flag      = flag
-        self.score     = score
+        self.key = key
+        self.depth = depth
+        self.flag = flag
+        self.score = score
         self.best_move = best_move
 
 

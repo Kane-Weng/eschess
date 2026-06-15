@@ -16,8 +16,8 @@ For the Python engine, the move source and evaluation are also selectable:
     --eval simple | medium | complex | nn   (used only by alpha-beta search)
 
 The 'nn' evaluation wraps the trained value network; 'policy' search uses the
-trained policy network. Both load weights from 'supervised' (nn/weights) or 
-'rl' (nn/weights/rl, the self-play checkpoints). The GUI exposes this source 
+trained policy network. Both load weights from 'supervised' (nn/weights) or
+'rl' (nn/weights/rl, the self-play checkpoints). The GUI exposes this source
 toggle, so RL nets can be played directly without copying them up into nn/weights first.
 """
 
@@ -27,16 +27,17 @@ from pathlib import Path
 
 from engine.board import Color, PieceType, name_to_square
 
-_PYTHON_DIR  = Path(__file__).resolve().parent
-_REPO_ROOT   = _PYTHON_DIR.parent
+_PYTHON_DIR = Path(__file__).resolve().parent
+_REPO_ROOT = _PYTHON_DIR.parent
 _WEIGHTS_DIR = _PYTHON_DIR / "nn" / "weights"
-_RL_DIR      = _WEIGHTS_DIR / "rl"
+_RL_DIR = _WEIGHTS_DIR / "rl"
 
 DEFAULT_CPP_COMMAND = str(_REPO_ROOT / "cpp" / "build" / "uci")
 DEFAULT_RUST_COMMAND = str(_REPO_ROOT / "rust" / "target" / "release" / "uci")
 
 
 # -- Availability checks (used by the GUI to grey out impossible options) -----
+
 
 def cpp_available(command: str | None = None) -> bool:
     """True when the compiled C++ UCI binary exists."""
@@ -57,9 +58,12 @@ def has_rl_weights(kind: str) -> bool:
     """True when a self-play RL checkpoint for <kind> exists in nn/weights/rl/."""
     return _rl_weight(kind) is not None
 
+
 _CHAR_TO_PROMO = {
-    'n': PieceType.KNIGHT, 'b': PieceType.BISHOP,
-    'r': PieceType.ROOK,   'q': PieceType.QUEEN,
+    "n": PieceType.KNIGHT,
+    "b": PieceType.BISHOP,
+    "r": PieceType.ROOK,
+    "q": PieceType.QUEEN,
 }
 
 
@@ -73,18 +77,31 @@ def _uci_to_move(text: str):
 
 # -- External UCI engine (e.g. the C++ port) ---------------------------------
 
+
 class UCIBackend:
     """Drives an external UCI engine as the bot brain."""
 
     def __init__(self, command: str, evaluator: str | None = None):
         self.command = command
-        self.last_info: dict = {"nodes": 0, "nps": 0, "score": None,
-                                "depth": 0, "time_s": 0.0, "pv": [],
-                                "multipv": [], "effort": {}}
+        self.last_info: dict = {
+            "nodes": 0,
+            "nps": 0,
+            "score": None,
+            "depth": 0,
+            "time_s": 0.0,
+            "pv": [],
+            "multipv": [],
+            "effort": {},
+        }
         self._multipv = 1
         self._proc = subprocess.Popen(
-            command, shell=True, text=True, bufsize=1,
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            command,
+            shell=True,
+            text=True,
+            bufsize=1,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
         )
         self._send("uci")
         self._wait_for("uciok")
@@ -123,8 +140,17 @@ class UCIBackend:
         white = board.turn == Color.WHITE
         self._send(f"position fen {board.to_fen()}")
         self._send(f"go depth {depth}")
-        info = {"nodes": 0, "nps": 0, "score": None, "depth": 0, "time_s": 0.0,
-                "pv": [], "multipv": [], "effort": {}, "stm_white": white}
+        info = {
+            "nodes": 0,
+            "nps": 0,
+            "score": None,
+            "depth": 0,
+            "time_s": 0.0,
+            "pv": [],
+            "multipv": [],
+            "effort": {},
+            "stm_white": white,
+        }
         multipv_map: dict[int, dict] = {}
         for raw in self._proc.stdout:
             line = raw.strip()
@@ -132,12 +158,15 @@ class UCIBackend:
                 info["effort"] = self._parse_effort(line)
             elif line.startswith("info"):
                 fields, idx = self._parse_info_fields(line, white)
-                if idx is None or idx == 1:   # base telemetry mirrors the best line
+                if idx is None or idx == 1:  # base telemetry mirrors the best line
                     info.update(fields)
                 if idx is not None:
                     pv = fields.get("pv", [])
-                    multipv_map[idx] = {"move": pv[0] if pv else None,
-                                        "score": fields.get("score"), "pv": pv}
+                    multipv_map[idx] = {
+                        "move": pv[0] if pv else None,
+                        "score": fields.get("score"),
+                        "pv": pv,
+                    }
             elif line.startswith("bestmove"):
                 info["multipv"] = [multipv_map[i] for i in sorted(multipv_map)]
                 self.last_info = info
@@ -168,7 +197,7 @@ class UCIBackend:
             except (ValueError, IndexError):
                 pass
         if "pv" in toks:
-            fields["pv"] = [_uci_to_move(t) for t in toks[toks.index("pv") + 1:]]
+            fields["pv"] = [_uci_to_move(t) for t in toks[toks.index("pv") + 1 :]]
         idx = None
         if "multipv" in toks:
             try:
@@ -199,6 +228,7 @@ class UCIBackend:
 
 # -- Policy-network move source ----------------------------------------------
 
+
 class PolicyBackend:
     """Picks the highest-probability legal move from the policy network."""
 
@@ -206,9 +236,16 @@ class PolicyBackend:
         self._net = net
         self._device = device
         # No tree search: the policy net picks one move
-        self.last_info: dict = {"nodes": 1, "nps": 0, "score": None,
-                                "depth": 0, "time_s": 0.0, "pv": [],
-                                "multipv": [], "effort": {}}
+        self.last_info: dict = {
+            "nodes": 1,
+            "nps": 0,
+            "score": None,
+            "depth": 0,
+            "time_s": 0.0,
+            "pv": [],
+            "multipv": [],
+            "effort": {},
+        }
 
     def set_multipv(self, k: int) -> None:
         """No tree search, so MultiPV / density analysis is unavailable."""
@@ -226,12 +263,19 @@ class PolicyBackend:
         (from_square, to_square), _ = max(priors.items(), key=lambda kv: kv[1])
         promotion = PieceType.QUEEN if board.needs_promotion(from_square, to_square) else None
         move = (from_square, to_square, promotion)
-        self.last_info = {"nodes": 1, "nps": 0, "score": None, "depth": 0,
-                          "time_s": time.time() - start, "pv": [move]}
+        self.last_info = {
+            "nodes": 1,
+            "nps": 0,
+            "score": None,
+            "depth": 0,
+            "time_s": time.time() - start,
+            "pv": [move],
+        }
         return move
 
 
 # -- Weight loading ----------------------------------------------------------
+
 
 def _supervised_weight(kind: str) -> Path | None:
     """Most recent supervised nn/weights/*_<kind>.pt, or None (timestamps sort)."""
@@ -273,7 +317,7 @@ def _resolve_weights(kind: str, source: str) -> Path:
     can load whichever nets exist; raises only when neither source has any.
     """
     rl_first = source == "rl"
-    primary   = _rl_weight(kind) if rl_first else _supervised_weight(kind)
+    primary = _rl_weight(kind) if rl_first else _supervised_weight(kind)
     secondary = _supervised_weight(kind) if rl_first else _rl_weight(kind)
     path = primary or secondary
     if path is None:
@@ -294,11 +338,13 @@ def _load_net(net, weights: Path, device: str):
 
 # -- Factory -----------------------------------------------------------------
 
-def _build_evaluator(name: str, device: str, weights: str | None,
-                     weights_source: str = "supervised"):
+
+def _build_evaluator(
+    name: str, device: str, weights: str | None, weights_source: str = "supervised"
+):
     """Build a BaseEvaluate from a name; 'nn' loads the value network (from the
     supervised or RL checkpoints, per weights_source)."""
-    from engine.evaluate import SimpleEvaluate, MediumEvaluate, ComplexEvaluate
+    from engine.evaluate import ComplexEvaluate, MediumEvaluate, SimpleEvaluate
 
     if name == "simple":
         return SimpleEvaluate()
@@ -307,19 +353,27 @@ def _build_evaluator(name: str, device: str, weights: str | None,
     if name == "complex":
         return ComplexEvaluate()
     if name == "nn":
-        from nn.network import ValueNet
         from nn.inference import NNEvaluate
+        from nn.network import ValueNet
+
         path = Path(weights) if weights else _resolve_weights("value", weights_source)
         net = _load_net(ValueNet(), path, device)
         return NNEvaluate(net, device)
     raise ValueError(f"unknown evaluation '{name}'")
 
 
-def make_engine(lang: str = "py", search: str = "alphabeta", evaluator: str = "medium",
-                device: str = "cpu", value_weights: str | None = None,
-                policy_weights: str | None = None, cpp_command: str | None = None,
-                rust_command: str | None = None, tt_size_mb: int = 32,
-                weights_source: str = "supervised"):
+def make_engine(
+    lang: str = "py",
+    search: str = "alphabeta",
+    evaluator: str = "medium",
+    device: str = "cpu",
+    value_weights: str | None = None,
+    policy_weights: str | None = None,
+    cpp_command: str | None = None,
+    rust_command: str | None = None,
+    tt_size_mb: int = 32,
+    weights_source: str = "supervised",
+):
     """Build the bot backend chosen by the command line args (see module docstring).
 
     weights_source selects which network checkpoints the 'nn' eval and 'policy'
@@ -333,10 +387,16 @@ def make_engine(lang: str = "py", search: str = "alphabeta", evaluator: str = "m
 
     if search == "policy":
         from nn.network import PolicyNet
-        path = Path(policy_weights) if policy_weights else _resolve_weights("policy", weights_source)
+
+        path = (
+            Path(policy_weights) if policy_weights else _resolve_weights("policy", weights_source)
+        )
         net = _load_net(PolicyNet(), path, device)
         return PolicyBackend(net, device)
 
     from engine.search import Search
-    return Search(evaluator=_build_evaluator(evaluator, device, value_weights, weights_source),
-                  tt_size_mb=tt_size_mb)
+
+    return Search(
+        evaluator=_build_evaluator(evaluator, device, value_weights, weights_source),
+        tt_size_mb=tt_size_mb,
+    )

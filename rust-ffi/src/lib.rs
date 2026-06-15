@@ -5,7 +5,7 @@
 //!   - `PyBoard`         — the core CBoard (make/unmake, legal moves, FEN, zobrist)
 //!   - `board_to_planes` — native (18,8,8) f32 encoding (mirrors nn/encoding.py)
 //!   - `SelfPlayEngine`  — parallel, GIL-released MCTS self-play with batched NN
-//!                         inference supplied by a Python callback
+//!     inference supplied by a Python callback
 //!
 //! See python/nn/native.py for the Python-side adapter and fallback wiring.
 

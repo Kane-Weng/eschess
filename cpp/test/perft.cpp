@@ -43,16 +43,14 @@ uint64_t perft(CBoard &board, int depth) {
 
 // Run perft for depths 1..N. `expected` holds the known reference node counts
 // (Chess Programming Wiki); pass an empty vector when no reference is known.
-void run(const std::string &name, const std::string &fen,
-         const std::vector<uint64_t> &expected) {
+void run(const std::string &name, const std::string &fen, const std::vector<uint64_t> &expected) {
     std::cout << name << "  (" << fen << ")\n";
     for (size_t i = 0; i < expected.size(); ++i) {
         int d = static_cast<int>(i) + 1;
         CBoard b = CBoard::from_fen(fen);
         uint64_t got = perft(b, d);
         uint64_t ref = expected[i];
-        std::cout << "  perft(" << d << ") = " << got
-                  << "  (expected " << ref << ") "
+        std::cout << "  perft(" << d << ") = " << got << "  (expected " << ref << ") "
                   << (got == ref ? "OK" : "MISMATCH") << "\n";
     }
     std::cout << std::endl;
@@ -63,8 +61,7 @@ void run(const std::string &name, const std::string &fen, int max_depth) {
     std::cout << name << "  (" << fen << ")\n";
     for (int d = 1; d <= max_depth; ++d) {
         CBoard b = CBoard::from_fen(fen);
-        std::cout << "  perft(" << d << ") = " << perft(b, d)
-                  << "  (no reference)\n";
+        std::cout << "  perft(" << d << ") = " << perft(b, d) << "  (no reference)\n";
     }
     std::cout << std::endl;
 }
@@ -81,13 +78,10 @@ int main(int argc, char **argv) {
     // Standard reference positions (Chess Programming Wiki perft results).
     run("startpos", "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
         {20, 400, 8902, 197281, 4865609});
-    run("kiwipete",
-        "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+    run("kiwipete", "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
         {48, 2039, 97862, 4085603});
-    run("position3", "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1",
-        {14, 191, 2812, 43238, 674624});
-    run("position4",
-        "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1",
+    run("position3", "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1", {14, 191, 2812, 43238, 674624});
+    run("position4", "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1",
         {6, 264, 9467, 422333});
     return 0;
 }

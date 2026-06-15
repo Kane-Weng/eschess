@@ -68,14 +68,18 @@ fn uci_to_move(text: &str) -> Move {
     Move {
         from: name_to_square(&b[0..2]),
         to: name_to_square(&b[2..4]),
-        promotion: if b.len() > 4 { char_to_promo(b[4]) } else { NO_PIECE },
+        promotion: if b.len() > 4 {
+            char_to_promo(b[4])
+        } else {
+            NO_PIECE
+        },
     }
 }
 
 fn score_to_uci(score: f64, white_to_move: bool, pv_len: usize) -> String {
     let stm = if white_to_move { score } else { -score };
     if stm.abs() >= MATE_THRESHOLD {
-        let moves = if pv_len > 0 { (pv_len + 1) / 2 } else { 1 } as i64;
+        let moves = if pv_len > 0 { pv_len.div_ceil(2) } else { 1 } as i64;
         format!("mate {}", if stm > 0.0 { moves } else { -moves })
     } else {
         format!("cp {}", (stm * 100.0).round() as i64)
@@ -223,11 +227,18 @@ impl UCIEngine {
         }
         if params.contains_key("wtime") || params.contains_key("btime") {
             let white = self.board.turn == WHITE;
-            let remaining = *params.get(if white { "wtime" } else { "btime" }).unwrap_or(&1000);
-            let increment = *params.get(if white { "winc" } else { "binc" }).unwrap_or(&0);
+            let remaining = *params
+                .get(if white { "wtime" } else { "btime" })
+                .unwrap_or(&1000);
+            let increment = *params
+                .get(if white { "winc" } else { "binc" })
+                .unwrap_or(&0);
             let movestogo = *params.get("movestogo").unwrap_or(&30);
             let budget = remaining as f64 / movestogo.max(1) as f64 + increment as f64 * 0.8;
-            return (max_depth, Some(apply_margin(budget.min(remaining as f64 * 0.9))));
+            return (
+                max_depth,
+                Some(apply_margin(budget.min(remaining as f64 * 0.9))),
+            );
         }
         if params.contains_key("depth") {
             return (max_depth, None);
@@ -244,7 +255,11 @@ impl UCIEngine {
         let white = self.board.turn == WHITE;
 
         if self.multipv > 1 {
-            let depth = if max_depth < MAX_PLY as i32 { max_depth } else { 4 };
+            let depth = if max_depth < MAX_PLY as i32 {
+                max_depth
+            } else {
+                4
+            };
             self.go_multipv(depth, white);
             return;
         }

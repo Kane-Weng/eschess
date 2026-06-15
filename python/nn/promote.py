@@ -27,13 +27,14 @@ def _default_source(kind: str) -> Path:
     best = _RL_DIR / f"best_{kind}.pt"
     if best.exists():
         return best
-    return _RL_DIR / f"latest_{kind}.pt"   # may be absent; _promote reports it
+    return _RL_DIR / f"latest_{kind}.pt"  # may be absent; _promote reports it
 
 
 def _promote(kind: str, source: Path, stamp: str) -> Path:
     if not source.exists():
         raise FileNotFoundError(
-            f"no '{kind}' RL weights at {source}. Train some first: python -m nn.rl")
+            f"no '{kind}' RL weights at {source}. Train some first: python -m nn.rl"
+        )
     target = _WEIGHTS_DIR / f"{stamp}_{kind}.pt"
     shutil.copyfile(source, target)
     return target
@@ -41,16 +42,20 @@ def _promote(kind: str, source: Path, stamp: str) -> Path:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Promote RL networks for the engine/GUI to load.")
-    parser.add_argument("--policy", default=None, help="RL policy weights (default: rl/best_policy.pt)")
-    parser.add_argument("--value", default=None, help="RL value weights (default: rl/best_value.pt)")
+    parser.add_argument(
+        "--policy", default=None, help="RL policy weights (default: rl/best_policy.pt)"
+    )
+    parser.add_argument(
+        "--value", default=None, help="RL value weights (default: rl/best_value.pt)"
+    )
     args = parser.parse_args()
 
     policy_src = Path(args.policy) if args.policy else _default_source("policy")
-    value_src  = Path(args.value)  if args.value  else _default_source("value")
+    value_src = Path(args.value) if args.value else _default_source("value")
 
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     policy_out = _promote("policy", policy_src, stamp)
-    value_out  = _promote("value", value_src, stamp)
+    value_out = _promote("value", value_src, stamp)
     print(f"promoted policy -> {policy_out}", flush=True)
     print(f"promoted value  -> {value_out}", flush=True)
     print("the engine/GUI will now load these as the latest weights.", flush=True)

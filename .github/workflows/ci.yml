@@ -75,3 +75,36 @@ jobs:
       #    python/nn/encoding.py, move-gen/FEN/Zobrist parity, self-play determinism.
       - name: Run parity tests
         run: uv run --extra ffi pytest tests/
+
+  # Style gate: runs the exact same hooks as local pre-commit, so CI and the
+  # developer machine enforce identical formatting/linting. Parallel to the build.
+  lint:
+    name: Format & Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # rustfmt + clippy components for the local cargo hooks in .pre-commit-config.yaml.
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            rust
+            rust-ffi
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      # Single source of truth: ruff + clang-format (pinned) + cargo fmt/clippy.
+      - name: Run pre-commit hooks
+        run: uvx pre-commit run --all-files --show-diff-on-failure

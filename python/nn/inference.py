@@ -19,6 +19,7 @@ import torch
 
 from engine.board import CBoard
 from engine.evaluate import BaseEvaluate
+
 from .encoding import board_to_planes, index_to_move, legal_policy_mask
 from .network import PolicyNet, ValueNet
 
@@ -36,14 +37,14 @@ class NNEvaluate(BaseEvaluate):
     """Use a trained ValueNet as the search's evaluation function."""
 
     def __init__(self, net: ValueNet, device: str = "cpu", pawn_scale: float = _VALUE_PAWN_SCALE):
-        self._net    = net.to(device).eval()
+        self._net = net.to(device).eval()
         self._device = device
-        self._scale  = pawn_scale
+        self._scale = pawn_scale
 
     def evaluate(self, board: CBoard) -> float:
         with torch.no_grad():
             value = self._net(_planes_tensor(board, self._device)).item()
-        return value * self._scale   # White's perspective, pawn units
+        return value * self._scale  # White's perspective, pawn units
 
 
 def value_estimate(net: ValueNet, board: CBoard, device: str = "cpu") -> float:
@@ -52,7 +53,9 @@ def value_estimate(net: ValueNet, board: CBoard, device: str = "cpu") -> float:
         return float(net(_planes_tensor(board, device)).item())
 
 
-def policy_priors(net: PolicyNet, board: CBoard, device: str = "cpu") -> dict[tuple[int, int], float]:
+def policy_priors(
+    net: PolicyNet, board: CBoard, device: str = "cpu"
+) -> dict[tuple[int, int], float]:
     """Return {(from_square, to_square): probability} over the legal moves."""
     with torch.no_grad():
         logits = net(_planes_tensor(board, device)).squeeze(0).cpu().numpy()
@@ -63,7 +66,7 @@ def policy_priors(net: PolicyNet, board: CBoard, device: str = "cpu") -> dict[tu
         return {}
 
     legal_logits = logits[legal_indices]
-    legal_logits -= legal_logits.max()          # stabilise before exp
+    legal_logits -= legal_logits.max()  # stabilise before exp
     weights = np.exp(legal_logits)
     weights /= weights.sum()
 

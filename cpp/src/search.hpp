@@ -20,16 +20,15 @@ constexpr int QS_DEPTH = 8;
 // One root move's full-window analysis (for the GUI's MultiPV / density overlays).
 struct RootAnalysis {
     Move move;
-    double score;       // White's-POV pawns
-    long node_count;    // nodes spent in this move's subtree
+    double score;     // White's-POV pawns
+    long node_count;  // nodes spent in this move's subtree
     std::vector<Move> pv;
 };
 
 class Search {
-public:
+   public:
     // info_callback(depth, score, nodes, elapsed_s, pv)
-    using InfoCallback =
-        std::function<void(int, double, long, double, const std::vector<Move> &)>;
+    using InfoCallback = std::function<void(int, double, long, double, const std::vector<Move> &)>;
 
     explicit Search(std::unique_ptr<BaseEvaluate> evaluator = nullptr, int tt_size_mb = 32);
 
@@ -45,7 +44,7 @@ public:
 
     std::vector<RootAnalysis> analyze(CBoard &board, int depth);
 
-private:
+   private:
     std::unique_ptr<BaseEvaluate> evaluate_;
     TranspositionTable tt_;
     Move killers_[MAX_PLY][2];

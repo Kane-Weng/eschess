@@ -6,12 +6,11 @@
 #include <cmath>
 #include <cstdint>
 #include <iostream>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <unordered_map>
 #include <vector>
-
-#include <memory>
 
 #include "board.hpp"
 #include "evaluate.hpp"
@@ -45,20 +44,28 @@ int name_to_square(const std::string &name) {
 
 char promo_to_char(int promotion) {
     switch (promotion) {
-        case KNIGHT: return 'n';
-        case BISHOP: return 'b';
-        case ROOK: return 'r';
-        case QUEEN: return 'q';
+        case KNIGHT:
+            return 'n';
+        case BISHOP:
+            return 'b';
+        case ROOK:
+            return 'r';
+        case QUEEN:
+            return 'q';
     }
     return '?';
 }
 
 int char_to_promo(char c) {
     switch (c) {
-        case 'n': return KNIGHT;
-        case 'b': return BISHOP;
-        case 'r': return ROOK;
-        case 'q': return QUEEN;
+        case 'n':
+            return KNIGHT;
+        case 'b':
+            return BISHOP;
+        case 'r':
+            return ROOK;
+        case 'q':
+            return QUEEN;
     }
     return NO_PIECE;
 }
@@ -86,7 +93,7 @@ std::string score_to_uci(double score, bool white_to_move, int pv_len) {
 }
 
 class UCIEngine {
-public:
+   public:
     UCIEngine() : board_(CBoard::from_fen(STARTPOS_FEN)), hash_mb_(32) {}
 
     void run() {
@@ -123,7 +130,7 @@ public:
         }
     }
 
-private:
+   private:
     CBoard board_;
     Search search_;
     int hash_mb_;
@@ -141,7 +148,8 @@ private:
         std::cout << "id name " << ENGINE_NAME << "\n";
         std::cout << "id author " << ENGINE_AUTHOR << "\n";
         std::cout << "option name Hash type spin default 32 min 1 max 1024\n";
-        std::cout << "option name Eval type combo default medium var simple var medium var complex\n";
+        std::cout
+            << "option name Eval type combo default medium var simple var medium var complex\n";
         std::cout << "option name MultiPV type spin default 1 min 1 max 5\n";
         std::cout << "uciok" << std::endl;
     }
@@ -238,8 +246,8 @@ private:
             long increment =
                 params.count(white ? "winc" : "binc") ? params.at(white ? "winc" : "binc") : 0;
             long movestogo = params.count("movestogo") ? params.at("movestogo") : 30;
-            double budget = static_cast<double>(remaining) / std::max(1L, movestogo) +
-                            increment * 0.8;
+            double budget =
+                static_cast<double>(remaining) / std::max(1L, movestogo) + increment * 0.8;
             return {max_depth, apply_margin(std::min(budget, remaining * 0.9))};
         }
 
@@ -274,8 +282,8 @@ private:
             }
             std::cout << "info depth " << depth << " score "
                       << score_to_uci(score, white, static_cast<int>(pv.size())) << " nodes "
-                      << nodes << " nps " << nps << " time "
-                      << static_cast<long>(elapsed * 1000) << " pv " << pv_text << std::endl;
+                      << nodes << " nps " << nps << " time " << static_cast<long>(elapsed * 1000)
+                      << " pv " << pv_text << std::endl;
         };
 
         auto result = search_.search_position(board_, max_depth, time_limit_ms, emit_info);
@@ -302,8 +310,8 @@ private:
                 pv_text += move_to_uci(r.pv[j]);
             }
             std::cout << "info multipv " << (i + 1) << " depth " << depth << " score "
-                      << score_to_uci(r.score, white, static_cast<int>(r.pv.size()))
-                      << " nodes " << total_nodes << " pv " << pv_text << std::endl;
+                      << score_to_uci(r.score, white, static_cast<int>(r.pv.size())) << " nodes "
+                      << total_nodes << " pv " << pv_text << std::endl;
         }
         std::string effort = "info string effort";
         for (const auto &r : results)

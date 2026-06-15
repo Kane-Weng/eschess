@@ -21,12 +21,13 @@ from torch import nn
 
 from .encoding import INPUT_PLANES, POLICY_SIZE
 
-_DEFAULT_CHANNELS   = 64
+_DEFAULT_CHANNELS = 64
 _DEFAULT_RES_BLOCKS = 4
-_BOARD_SQUARES      = 8 * 8
+_BOARD_SQUARES = 8 * 8
 
 
 # -- Building blocks ---------------------------------------------------------
+
 
 class ConvBlock(nn.Module):
     """3x3 convolution that preserves the 8x8 shape, then batchnorm and relu."""
@@ -61,7 +62,7 @@ class _Trunk(nn.Module):
 
     def __init__(self, channels: int, num_res_blocks: int):
         super().__init__()
-        self.stem   = ConvBlock(INPUT_PLANES, channels)
+        self.stem = ConvBlock(INPUT_PLANES, channels)
         self.blocks = nn.Sequential(*[ResidualBlock(channels) for _ in range(num_res_blocks)])
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -70,15 +71,20 @@ class _Trunk(nn.Module):
 
 # -- Networks ----------------------------------------------------------------
 
+
 class PolicyNet(nn.Module):
     """Maps a board tensor to from-to move logits."""
 
-    def __init__(self, channels: int = _DEFAULT_CHANNELS, num_res_blocks: int = _DEFAULT_RES_BLOCKS,
-                 head_channels: int = 32):
+    def __init__(
+        self,
+        channels: int = _DEFAULT_CHANNELS,
+        num_res_blocks: int = _DEFAULT_RES_BLOCKS,
+        head_channels: int = 32,
+    ):
         super().__init__()
         self.trunk = _Trunk(channels, num_res_blocks)
-        self.head  = ConvBlock(channels, head_channels)
-        self.fc    = nn.Linear(head_channels * _BOARD_SQUARES, POLICY_SIZE)
+        self.head = ConvBlock(channels, head_channels)
+        self.fc = nn.Linear(head_channels * _BOARD_SQUARES, POLICY_SIZE)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         out = self.head(self.trunk(x))
@@ -88,13 +94,18 @@ class PolicyNet(nn.Module):
 class ValueNet(nn.Module):
     """Maps a board tensor to a single scalar in [-1, 1]."""
 
-    def __init__(self, channels: int = _DEFAULT_CHANNELS, num_res_blocks: int = _DEFAULT_RES_BLOCKS,
-                 head_channels: int = 1, hidden: int = 64):
+    def __init__(
+        self,
+        channels: int = _DEFAULT_CHANNELS,
+        num_res_blocks: int = _DEFAULT_RES_BLOCKS,
+        head_channels: int = 1,
+        hidden: int = 64,
+    ):
         super().__init__()
         self.trunk = _Trunk(channels, num_res_blocks)
-        self.head  = ConvBlock(channels, head_channels)
-        self.fc1   = nn.Linear(head_channels * _BOARD_SQUARES, hidden)
-        self.fc2   = nn.Linear(hidden, 1)
+        self.head = ConvBlock(channels, head_channels)
+        self.fc1 = nn.Linear(head_channels * _BOARD_SQUARES, hidden)
+        self.fc2 = nn.Linear(hidden, 1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         out = self.head(self.trunk(x))

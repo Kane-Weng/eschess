@@ -6,22 +6,22 @@
 #include "board.hpp"
 
 class BaseEvaluate {
-public:
+   public:
     virtual ~BaseEvaluate() = default;
     virtual double evaluate(const CBoard &board) const = 0;
 };
 
 class SimpleEvaluate : public BaseEvaluate {
-public:
+   public:
     double evaluate(const CBoard &board) const override;
 };
 
 class MediumEvaluate : public BaseEvaluate {
-public:
+   public:
     double evaluate(const CBoard &board) const override;
 };
 
 class ComplexEvaluate : public BaseEvaluate {
-public:
+   public:
     double evaluate(const CBoard &board) const override;
 };

@@ -19,6 +19,7 @@ import torch
 from torch.utils.data import Dataset
 
 from engine.board import CBoard, PieceType, name_to_square
+
 from .encoding import board_to_planes, move_to_index
 
 HF_DATASET_NAME = "angeluriot/chess_games"
@@ -29,8 +30,10 @@ _WINNER_VALUE = {"white": 1.0, "black": -1.0, None: 0.0}
 
 # Promotion suffix in a UCI move (e.g. the 'q' in 'c7c8q').
 _PROMO_CHARS = {
-    "n": PieceType.KNIGHT, "b": PieceType.BISHOP,
-    "r": PieceType.ROOK,   "q": PieceType.QUEEN,
+    "n": PieceType.KNIGHT,
+    "b": PieceType.BISHOP,
+    "r": PieceType.ROOK,
+    "q": PieceType.QUEEN,
 }
 
 
@@ -45,8 +48,8 @@ class Sample:
 def _parse_uci(move: str) -> tuple[int, int, PieceType | None]:
     """UCI long algebraic to (from_square, to_square, promotion)."""
     from_square = name_to_square(move[0:2])
-    to_square   = name_to_square(move[2:4])
-    promotion   = _PROMO_CHARS.get(move[4]) if len(move) > 4 else None
+    to_square = name_to_square(move[2:4])
+    promotion = _PROMO_CHARS.get(move[4]) if len(move) > 4 else None
     return from_square, to_square, promotion
 
 
@@ -85,13 +88,14 @@ def _load_dotenv(path: Path = _ENV_PATH) -> None:
         os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
 
-def load_hf_samples(max_games: int = 1000, split: str = "train",
-                    min_elo: int | None = None, streaming: bool = True) -> list[Sample]:
+def load_hf_samples(
+    max_games: int = 1000, split: str = "train", min_elo: int | None = None, streaming: bool = True
+) -> list[Sample]:
     """Stream games from the Hugging Face dataset and replay them into samples."""
-    from datasets import load_dataset   # optional dep, imported on demand
+    from datasets import load_dataset  # optional dep, imported on demand
 
     _load_dotenv()
-    token = os.environ.get("HF_TOKEN") or None   # None falls back to anonymous access
+    token = os.environ.get("HF_TOKEN") or None  # None falls back to anonymous access
     dataset = load_dataset(HF_DATASET_NAME, split=split, streaming=streaming, token=token)
     samples: list[Sample] = []
     games = 0
@@ -105,7 +109,7 @@ def load_hf_samples(max_games: int = 1000, split: str = "train",
         try:
             samples.extend(game_to_samples(game["moves_uci"], game["winner"]))
         except Exception:
-            continue   # skip a malformed game rather than abort the whole run
+            continue  # skip a malformed game rather than abort the whole run
         games += 1
     return samples
 

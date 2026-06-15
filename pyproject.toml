@@ -26,6 +26,18 @@ ffi = [
 [tool.uv.sources]
 eschess-native = { path = "rust-ffi" }
 
-# Test runner for the cross-language parity suite (tests/). Synced by default.
+# Dev tooling (synced by default): test runner + formatter/linter + hook manager.
 [dependency-groups]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "ruff>=0.6", "pre-commit>=3"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["python"]
+
+[tool.ruff.lint]
+# E: pycodestyle  F: pyflakes (unused imports / undefined names)  I: isort
+select = ["E", "F", "I"]
+
+[tool.ruff.format]
+quote-style = "double"

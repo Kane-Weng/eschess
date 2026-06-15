@@ -26,6 +26,7 @@ import math
 import numpy as np
 
 from engine.board import CBoard, Color, PieceType
+
 from .inference import policy_priors, value_estimate
 from .network import PolicyNet, ValueNet
 
@@ -40,9 +41,9 @@ class MCTSNode:
     __slots__ = ("prior", "visit_count", "value_sum", "children", "is_expanded")
 
     def __init__(self, prior: float):
-        self.prior       = prior
+        self.prior = prior
         self.visit_count = 0
-        self.value_sum   = 0.0
+        self.value_sum = 0.0
         self.children: dict[MoveKey, "MCTSNode"] = {}
         self.is_expanded = False
 
@@ -59,16 +60,23 @@ def _resolve_promotion(board: CBoard, from_square: int, to_square: int) -> Piece
 class MCTS:
     """AlphaZero-style PUCT search guided by the policy and value networks."""
 
-    def __init__(self, policy_net: PolicyNet, value_net: ValueNet, device: str = "cpu",
-                 n_simulations: int = 100, c_puct: float = 1.5,
-                 dirichlet_alpha: float = 0.3, noise_frac: float = 0.25):
-        self.policy_net      = policy_net
-        self.value_net       = value_net
-        self.device          = device
-        self.n_simulations   = n_simulations
-        self.c_puct          = c_puct
+    def __init__(
+        self,
+        policy_net: PolicyNet,
+        value_net: ValueNet,
+        device: str = "cpu",
+        n_simulations: int = 100,
+        c_puct: float = 1.5,
+        dirichlet_alpha: float = 0.3,
+        noise_frac: float = 0.25,
+    ):
+        self.policy_net = policy_net
+        self.value_net = value_net
+        self.device = device
+        self.n_simulations = n_simulations
+        self.c_puct = c_puct
         self.dirichlet_alpha = dirichlet_alpha
-        self.noise_frac      = noise_frac
+        self.noise_frac = noise_frac
 
     # -- Public API ----------------------------------------------------------
 
@@ -84,8 +92,9 @@ class MCTS:
             while node.is_expanded and node.children:
                 move_key, node = self._select_child(node)
                 from_square, to_square = move_key
-                board.make_move(from_square, to_square,
-                                _resolve_promotion(board, from_square, to_square))
+                board.make_move(
+                    from_square, to_square, _resolve_promotion(board, from_square, to_square)
+                )
                 path.append(node)
 
             value = self._evaluate_leaf(node, board)
@@ -144,7 +153,7 @@ class MCTS:
         """Propagate the leaf value up the path, flipping sign each ply."""
         for node in reversed(path):
             node.visit_count += 1
-            node.value_sum   += value
+            node.value_sum += value
             value = -value
 
 
@@ -160,6 +169,7 @@ def _terminal_value(board: CBoard) -> float | None:
 
 
 # -- Move selection from visit counts ----------------------------------------
+
 
 def visit_policy(visit_counts: dict[MoveKey, int]) -> dict[MoveKey, float]:
     """Normalise visit counts into a probability distribution (training target)."""

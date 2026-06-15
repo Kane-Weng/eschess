@@ -27,25 +27,29 @@ Run:  python3 uci.py     (or: uv run python uci.py)
 import argparse
 import sys
 
-from engine.board import CBoard, Color, PieceType, STARTPOS_FEN, square_name, name_to_square
+from engine.board import STARTPOS_FEN, CBoard, Color, PieceType, name_to_square, square_name
 from engine_backend import make_engine
 
-ENGINE_NAME   = "Eschess"
+ENGINE_NAME = "Eschess"
 ENGINE_AUTHOR = "Kane Weng"
 
 # Score sentinel: the search returns ±(9000 + depth) pawn-units for forced mate.
 _MATE_THRESHOLD = 8_000
 
-_TIME_SAFETY      = 0.85
+_TIME_SAFETY = 0.85
 _MOVE_OVERHEAD_MS = 20.0
+
 
 def _apply_margin(budget_ms: float) -> float:
     """Shrink a nominal time budget to leave room for overshoot + I/O overhead."""
     return max(10.0, budget_ms * _TIME_SAFETY - _MOVE_OVERHEAD_MS)
 
+
 _PROMO_TO_CHAR = {
-    PieceType.KNIGHT: 'n', PieceType.BISHOP: 'b',
-    PieceType.ROOK:   'r', PieceType.QUEEN:  'q',
+    PieceType.KNIGHT: "n",
+    PieceType.BISHOP: "b",
+    PieceType.ROOK: "r",
+    PieceType.QUEEN: "q",
 }
 _CHAR_TO_PROMO = {v: k for k, v in _PROMO_TO_CHAR.items()}
 
@@ -64,8 +68,8 @@ def move_to_uci(move: Move) -> str:
 def uci_to_move(text: str) -> Move:
     """UCI long algebraic → (from, to, promo). e.g. 'e7e8q' → (52, 60, QUEEN)."""
     from_square = name_to_square(text[0:2])
-    to_square   = name_to_square(text[2:4])
-    promotion   = _CHAR_TO_PROMO[text[4]] if len(text) > 4 else None
+    to_square = name_to_square(text[2:4])
+    promotion = _CHAR_TO_PROMO[text[4]] if len(text) > 4 else None
     return from_square, to_square, promotion
 
 
@@ -84,12 +88,13 @@ def _score_to_uci(score: float, white_to_move: bool, pv_len: int = 0) -> str:
 
 
 class UCIEngine:
-    def __init__(self, search: str = "alphabeta", evaluator: str = "medium",
-                 device: str = "cpu") -> None:
-        self.board   = CBoard()
-        self._search  = search
-        self._eval    = evaluator
-        self._device  = device
+    def __init__(
+        self, search: str = "alphabeta", evaluator: str = "medium", device: str = "cpu"
+    ) -> None:
+        self.board = CBoard()
+        self._search = search
+        self._eval = evaluator
+        self._device = device
         self._hash_mb = 32
         self._multipv = 1
         self._build_engine()
@@ -98,8 +103,11 @@ class UCIEngine:
         """(Re)build the brain from the stored config; alpha-beta brains expose
         search_position, the policy brain only get_best_move."""
         self.engine = make_engine(
-            lang="py", search=self._search, evaluator=self._eval,
-            device=self._device, tt_size_mb=self._hash_mb,
+            lang="py",
+            search=self._search,
+            evaluator=self._eval,
+            device=self._device,
+            tt_size_mb=self._hash_mb,
         )
         self._is_search = hasattr(self.engine, "search_position")
 
@@ -110,7 +118,7 @@ class UCIEngine:
             line = raw.strip()
             if not line:
                 continue
-            cmd, _, rest = line.partition(' ')
+            cmd, _, rest = line.partition(" ")
 
             if cmd == "uci":
                 self._cmd_uci()
@@ -166,7 +174,7 @@ class UCIEngine:
             return
 
         if idx < len(tokens) and tokens[idx] == "moves":
-            for text in tokens[idx + 1:]:
+            for text in tokens[idx + 1 :]:
                 from_square, to_square, promotion = uci_to_move(text)
                 self.board.make_move(from_square, to_square, promotion)
 
@@ -194,7 +202,9 @@ class UCIEngine:
             )
 
         best_move, _ = self.engine.search_position(
-            self.board, max_depth=max_depth, time_limit_ms=time_limit_ms,
+            self.board,
+            max_depth=max_depth,
+            time_limit_ms=time_limit_ms,
             info_callback=emit_info,
         )
         print(f"bestmove {move_to_uci(best_move) if best_move else '0000'}", flush=True)
@@ -207,7 +217,7 @@ class UCIEngine:
             print("bestmove 0000", flush=True)
             return
         total_nodes = sum(r["nodes"] for r in results)
-        for i, r in enumerate(results[:self._multipv], start=1):
+        for i, r in enumerate(results[: self._multipv], start=1):
             pv_text = " ".join(move_to_uci(m) for m in r["pv"])
             print(
                 f"info multipv {i} depth {depth} "
@@ -235,8 +245,7 @@ class UCIEngine:
         i = 0
         while i < len(tokens):
             key = tokens[i]
-            if key in ("depth", "movetime", "wtime", "btime",
-                       "winc", "binc", "movestogo", "nodes"):
+            if key in ("depth", "movetime", "wtime", "btime", "winc", "binc", "movestogo", "nodes"):
                 params[key] = int(tokens[i + 1])
                 i += 2
             elif key == "infinite":
@@ -256,7 +265,7 @@ class UCIEngine:
         if "wtime" in params or "btime" in params:
             white = self.board.turn == Color.WHITE
             remaining = params.get("wtime" if white else "btime", 1_000)
-            increment = params.get("winc"  if white else "binc", 0)
+            increment = params.get("winc" if white else "binc", 0)
             movestogo = params.get("movestogo", 30)
             # Spend an even slice of the remaining time, plus most of the increment,
             # never risking more than 90% of the clock on a single move.
@@ -264,22 +273,30 @@ class UCIEngine:
             return max_depth, _apply_margin(min(budget, remaining * 0.9))
 
         if "depth" in params:
-            return max_depth, None        # pure depth search (depth-bounded)
+            return max_depth, None  # pure depth search (depth-bounded)
 
         if params.get("infinite"):
             # No async stop in this synchronous engine, cap so it never hangs.
             return max_depth, 10_000.0
 
-        return max_depth, _apply_margin(1_000.0)   # bare "go" → ~1s
+        return max_depth, _apply_margin(1_000.0)  # bare "go" → ~1s
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Eschess UCI engine.")
-    parser.add_argument("--search", choices=("alphabeta", "policy"), default="alphabeta",
-                        help="move source: alpha-beta tree search or the policy network")
-    parser.add_argument("--eval", choices=("simple", "medium", "complex", "nn"), default="medium",
-                        help="evaluation for alpha-beta search; 'nn' is the value network "
-                             "(ignored when --search policy)")
+    parser.add_argument(
+        "--search",
+        choices=("alphabeta", "policy"),
+        default="alphabeta",
+        help="move source: alpha-beta tree search or the policy network",
+    )
+    parser.add_argument(
+        "--eval",
+        choices=("simple", "medium", "complex", "nn"),
+        default="medium",
+        help="evaluation for alpha-beta search; 'nn' is the value network "
+        "(ignored when --search policy)",
+    )
     parser.add_argument("--device", default="cpu", help="torch device for the networks")
     return parser.parse_args()
 

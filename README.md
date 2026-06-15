@@ -1,8 +1,7 @@
 # Eschess
 
 A chess engine project built to **show how it thinks**, and to compare engine
-techniques across methods
-and languages.
+techniques across methods and languages.
 
 ## What's inside
 
@@ -26,13 +25,15 @@ and languages.
 - Pawn structure (doubled / isolated / passed), bishop pair, rough mobility,
   and a midgame/endgame king-safety table
 
-**Neural networks** (supervised; optional `nn` extra)
+**Neural networks** (optional `nn` extra)
 - Separate policy and value networks, each with a CNN or light-ResNet trunk
   (one `num_res_blocks` knob switches between them)
 - Board-to-planes encoding and a 4096 from-to policy head
 - Hybrid hooks: the value net drops into the alpha-beta search as a
   `BaseEvaluate`, and the policy net supplies move priors
-- Dataset and training-loop templates for supervised learning (no RL yet)
+- Supervised training on master games, plus an AlphaZero-style self-play
+  reinforcement-learning loop: a PUCT MCTS guided by the two nets, self-play
+  game generation, and per-generation training with acceptance gating
 
 **Interfaces**
 - UCI protocol over stdin/stdout — drives from any GUI or match runner
@@ -104,6 +105,56 @@ uv sync --extra nn             # adds torch + numpy + datasets
 cd python
 python -m nn.train --mode policy --max-games 2000 --epochs 5
 python -m nn.train --mode value  --max-games 2000 --min-elo 2200 --epochs 5
+```
+
+### Self-play reinforcement learning
+
+With supervised weights in place, `nn.rl` runs an AlphaZero-style loop on top of
+them: each generation plays self-play games (a PUCT MCTS using the policy net for
+priors and the value net for leaf evaluations), trains candidate nets on the
+collected `(position, MCTS policy, game result)` samples, and promotes the
+candidate only if it beats the current best in an in-process match. The nets are
+warm-started from the latest supervised checkpoints (training from scratch in
+pure Python is infeasible), and accepted generations are written to
+`nn/weights/rl/` — *not* `nn/weights/` — so the GUI keeps using the supervised
+nets until you adopt an RL net explicitly. A per-generation metrics CSV (policy
+loss, value loss, gate score) lands in `harness/results/`.
+
+```bash
+cd python
+python -m nn.rl --generations 5 --games-per-gen 20 --sims 80   # train (CPU-friendly)
+```
+
+The GUI can load the RL nets directly — no promotion step. The Engine-settings
+panel has a **Weights** toggle (`supervised` / `rl`) that points the `nn`
+evaluation and `policy` move source at `nn/weights/` or `nn/weights/rl/`; start
+on the RL nets with `python main.py --eval nn --weights rl` (value net) or
+`--search policy --weights rl`. For the UCI binary / harness (which always read
+`nn/weights/`), copy a chosen RL checkpoint up with `python -m nn.promote`.
+
+### Native self-play backend (optional `ffi` extra)
+
+Self-play is the bottleneck of the RL loop, so the move generation and MCTS can
+run natively. The `eschess_native` extension (Rust/PyO3, in `rust-ffi/`) wraps
+the fast Rust engine and runs the whole self-play loop across many games in
+parallel — bypassing the GIL — calling back into Python only for batched
+policy/value inference. It is optional: when it is not built, `nn.rl` falls back
+to the pure-Python self-play with no change in behaviour.
+
+Build it into the environment (needs a Rust toolchain), then select it with
+`--backend native` (the default `auto` uses it when available):
+
+```bash
+uv run --extra nn maturin develop --release -m rust-ffi/Cargo.toml   # build the module
+cd python
+python -m nn.rl --generations 5 --games-per-gen 64 --sims 80 --backend native
+```
+
+A quick parity check (native vs pure-Python move generation, encoding, and
+self-play) lives in `tests/` and runs without torch:
+
+```bash
+uv run --extra ffi python tests/test_native_parity.py
 ```
 
 ## Docker
@@ -251,9 +302,9 @@ docker run --rm -v "$PWD/harness/results:/app/harness/results" eschess \
   match harness against a dialed-down Stockfish, and Elo analysis with
   confidence intervals.
 - **Phase 2 — Machine learning & hybrids:** supervised value/policy networks on
-  master games, an AlphaZero-style self-play RL loop with MCTS, and a hybrid
-  orchestrator (opening book early, search/ML in the middlegame, endgame
-  tablebases when the board simplifies).
+  master games (done) and an AlphaZero-style self-play RL loop with MCTS (done,
+  `nn.rl`); still to come, a hybrid orchestrator (opening book early, search/ML
+  in the middlegame, endgame tablebases when the board simplifies).
 - **Phase 3 — Cross-language benchmarking (done):** the same alpha-beta search
   and evaluation in Python, C++ (`cpp/`), and Rust (`rust/`), verified equivalent
   by perft and byte-identical fixed-depth search; telemetry for nodes-per-second,

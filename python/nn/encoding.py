@@ -17,24 +17,28 @@ extension that would widen POLICY_SIZE.
 
 import numpy as np
 
-from engine.board import CBoard, Color, PieceType, CR_WK, CR_WQ, CR_BK, CR_BQ
+from engine.board import CR_BK, CR_BQ, CR_WK, CR_WQ, CBoard, Color, PieceType
 
 # -- Plane layout ------------------------------------------------------------
 # 12 piece planes (6 piece types per colour), and 6 auxiliary state planes.
 _PIECE_ORDER = [
-    PieceType.PAWN, PieceType.KNIGHT, PieceType.BISHOP,
-    PieceType.ROOK, PieceType.QUEEN, PieceType.KING,
+    PieceType.PAWN,
+    PieceType.KNIGHT,
+    PieceType.BISHOP,
+    PieceType.ROOK,
+    PieceType.QUEEN,
+    PieceType.KING,
 ]
 _NUM_PIECE_PLANES = 12
-_PLANE_STM      = 12   # side to move (all ones when White to move)
-_PLANE_CASTLE   = 13   # four planes: WK, WQ, BK, BQ
-_PLANE_EP       = 17   # en passant target square (single one-hot square)
-INPUT_PLANES    = 18
+_PLANE_STM = 12  # side to move (all ones when White to move)
+_PLANE_CASTLE = 13  # four planes: WK, WQ, BK, BQ
+_PLANE_EP = 17  # en passant target square (single one-hot square)
+INPUT_PLANES = 18
 
 _CASTLE_BITS = [CR_WK, CR_WQ, CR_BK, CR_BQ]
 
 # -- Policy layout -----------------------------------------------------------
-POLICY_SIZE = 64 * 64   # 4096 from-to combinations
+POLICY_SIZE = 64 * 64  # 4096 from-to combinations
 
 
 def _piece_plane_index(color: Color, piece_type: PieceType) -> int:
@@ -76,6 +80,7 @@ def board_to_planes(board: CBoard) -> np.ndarray:
 
 
 # -- Move encoding -----------------------------------------------------------
+
 
 def move_to_index(from_square: int, to_square: int) -> int:
     """Pack a (from, to) move into a flat policy index."""

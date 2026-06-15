@@ -4,72 +4,74 @@ Author: Kane Weng
 
 Main execution file for a chess game using pygame.
 
-Interactive sandbox features: 
+Interactive sandbox features:
 - A right-hand Engine settings panel (change lang / search / eval / depth live)
 - An Engine performance panel (nodes / NPS / depth / think time)
-- A left vertical eval bar (Stockfish-backed, else the engine's own score) 
-- A scrollable move list below the board with undo / redo, 
-- Collapsible captured-tray and move sections, and 
+- A left vertical eval bar (Stockfish-backed, else the engine's own score)
+- A scrollable move list below the board with undo / redo,
+- Collapsible captured-tray and move sections, and
 - Optional visualization tools
 """
 
 import argparse
+import copy
 import math
-import pygame
 import sys
 import threading
-import copy
 from pathlib import Path
-from engine.board import CBoard, Color, PieceType, bits_to_squares, square_name
+
+import pygame
+
 import engine_backend
-from engine_backend import make_engine
-import sidebar
 import eval_probe
+import sidebar
+from engine.board import CBoard, Color, PieceType
+from engine_backend import make_engine
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
 
 SQUARE_SIZE = 80
-PIECE_SIZE  = int(SQUARE_SIZE * 0.8)
-BOARD_PX    = SQUARE_SIZE * 8
-STATUS_H    = 36
+PIECE_SIZE = int(SQUARE_SIZE * 0.8)
+BOARD_PX = SQUARE_SIZE * 8
+STATUS_H = 36
 
 # Layout: [eval bar][board][right menu]; status bar + scrollable move list sit
 # below the board, spanning the eval bar + board width.
-EVAL_BAR_W     = 26
+EVAL_BAR_W = 26
 BOARD_ORIGIN_X = EVAL_BAR_W
-MENU_W         = 300
-MENU_X         = BOARD_ORIGIN_X + BOARD_PX
-WINDOW_W       = EVAL_BAR_W + BOARD_PX + MENU_W
-WINDOW_H       = 880
+MENU_W = 300
+MENU_X = BOARD_ORIGIN_X + BOARD_PX
+WINDOW_W = EVAL_BAR_W + BOARD_PX + MENU_W
+WINDOW_H = 880
 
-MOVELIST_Y = BOARD_PX + STATUS_H   # top of the move-list strip under the board
-MOVELIST_W = MENU_X                # spans eval bar + board
+MOVELIST_Y = BOARD_PX + STATUS_H  # top of the move-list strip under the board
+MOVELIST_W = MENU_X  # spans eval bar + board
 
 # Board-only span, used by the overlays that cover the board region.
-WIDTH  = BOARD_PX
+WIDTH = BOARD_PX
 HEIGHT = BOARD_PX + STATUS_H
 FPS = 60
 
 PLAYER_COLOR = Color.WHITE
-BOT_COLOR    = Color.BLACK
-BOT_DEPTH    = 3
+BOT_COLOR = Color.BLACK
+BOT_DEPTH = 3
 
-LIGHT_SQ   = pygame.Color(240, 217, 181)
-DARK_SQ    = pygame.Color(181, 136,  99)
-HIGHLIGHT  = (255, 255,   0, 140)  # yellow, semi-transparent
-LAST_MOVE  = (120, 190, 120, 130)  # green tint on the most recent move
-DOT_COLOR  = (  0,   0,   0, 150)  # black dot, semi-transparent
-CAPTURE_RG = (180,   0,   0, 120)  # red ring on capturable squares
-STATUS_BG  = (30,  30,  30, 220)
+LIGHT_SQ = pygame.Color(240, 217, 181)
+DARK_SQ = pygame.Color(181, 136, 99)
+HIGHLIGHT = (255, 255, 0, 140)  # yellow, semi-transparent
+LAST_MOVE = (120, 190, 120, 130)  # green tint on the most recent move
+DOT_COLOR = (0, 0, 0, 150)  # black dot, semi-transparent
+CAPTURE_RG = (180, 0, 0, 120)  # red ring on capturable squares
+STATUS_BG = (30, 30, 30, 220)
 STATUS_TURN_BG = (40, 110, 55, 235)  # lit-up green when it's the player's turn
-WINDOW_BG  = (18,  18,  22)
+WINDOW_BG = (18, 18, 22)
 
 # Search-path arrow colors (one per side; deliberately not black/white).
-ARROW_BOT_SIDE    = (235, 150,  40)   # side that moved first in the PV (the bot)
-ARROW_PLAYER_SIDE = ( 60, 180, 210)
+ARROW_BOT_SIDE = (235, 150, 40)  # side that moved first in the PV (the bot)
+ARROW_PLAYER_SIDE = (60, 180, 210)
 # Top-3 PV arrows, colored by rank: best / alternative / worst.
-ARROW_RANK    = [(70, 200, 90), (225, 185, 60), (215, 70, 70)]
-DENSITY_COLOR = (255, 120, 40)        # density-cloud rings (single warm hue)
+ARROW_RANK = [(70, 200, 90), (225, 185, 60), (215, 70, 70)]
+DENSITY_COLOR = (255, 120, 40)  # density-cloud rings (single warm hue)
 
 IMAGES: dict[tuple[Color, PieceType], pygame.Surface] = {}
 SMALL_IMAGES: dict[tuple[Color, PieceType], pygame.Surface] = {}  # captured tray
@@ -77,17 +79,33 @@ SMALL_IMAGES: dict[tuple[Color, PieceType], pygame.Surface] = {}  # captured tra
 PROMO_PIECES = [PieceType.QUEEN, PieceType.ROOK, PieceType.BISHOP, PieceType.KNIGHT]
 
 # Material for the captured-tray advantage readout.
-_START_COUNTS = {PieceType.PAWN: 8, PieceType.KNIGHT: 2, PieceType.BISHOP: 2,
-                 PieceType.ROOK: 2, PieceType.QUEEN: 1, PieceType.KING: 1}
-_PIECE_VALUE = {PieceType.PAWN: 1, PieceType.KNIGHT: 3, PieceType.BISHOP: 3,
-                PieceType.ROOK: 5, PieceType.QUEEN: 9, PieceType.KING: 0}
+_START_COUNTS = {
+    PieceType.PAWN: 8,
+    PieceType.KNIGHT: 2,
+    PieceType.BISHOP: 2,
+    PieceType.ROOK: 2,
+    PieceType.QUEEN: 1,
+    PieceType.KING: 1,
+}
+_PIECE_VALUE = {
+    PieceType.PAWN: 1,
+    PieceType.KNIGHT: 3,
+    PieceType.BISHOP: 3,
+    PieceType.ROOK: 5,
+    PieceType.QUEEN: 9,
+    PieceType.KING: 0,
+}
 
 
 def load_assets():
-    color_chars = {Color.WHITE: 'w', Color.BLACK: 'b'}
+    color_chars = {Color.WHITE: "w", Color.BLACK: "b"}
     piece_chars = {
-        PieceType.PAWN: 'pawn', PieceType.KNIGHT: 'knight', PieceType.BISHOP: 'bishop',
-        PieceType.ROOK: 'rook', PieceType.QUEEN: 'queen',   PieceType.KING: 'king',
+        PieceType.PAWN: "pawn",
+        PieceType.KNIGHT: "knight",
+        PieceType.BISHOP: "bishop",
+        PieceType.ROOK: "rook",
+        PieceType.QUEEN: "queen",
+        PieceType.KING: "king",
     }
     for color in Color:
         for piece in PieceType:
@@ -117,8 +135,7 @@ def screen_to_sq(x: int, y: int) -> int:
     return CBoard.get_square_idx(rank_idx, file_idx)
 
 
-def draw_board(screen: pygame.Surface, selected_sq: int | None,
-               last_move: tuple[int, int] | None):
+def draw_board(screen: pygame.Surface, selected_sq: int | None, last_move: tuple[int, int] | None):
     for sq in range(64):
         file_idx = CBoard.get_file_idx(sq)
         rank_idx = CBoard.get_rank_idx(sq)
@@ -161,13 +178,13 @@ def draw_move_dots(screen: pygame.Surface, board: CBoard, legal_mask: int):
         x, y = sq_to_screen(sq)
         dot_surf.fill((0, 0, 0, 0))
         if occ & (1 << sq):
-            pygame.draw.circle(dot_surf, CAPTURE_RG,
-                               (SQUARE_SIZE // 2, SQUARE_SIZE // 2),
-                               SQUARE_SIZE // 2, 6)
+            pygame.draw.circle(
+                dot_surf, CAPTURE_RG, (SQUARE_SIZE // 2, SQUARE_SIZE // 2), SQUARE_SIZE // 2, 6
+            )
         else:
-            pygame.draw.circle(dot_surf, DOT_COLOR,
-                               (SQUARE_SIZE // 2, SQUARE_SIZE // 2),
-                               SQUARE_SIZE // 7)
+            pygame.draw.circle(
+                dot_surf, DOT_COLOR, (SQUARE_SIZE // 2, SQUARE_SIZE // 2), SQUARE_SIZE // 7
+            )
         screen.blit(dot_surf, (x, y))
 
 
@@ -191,7 +208,7 @@ def _draw_arrow(surface, start, end, color, width=7, elbow=None):
 
 
 def _knight_elbow(from_sq: int, to_sq: int):
-    """Elbow pixel for a knight L-arrow. The long (2-square) leg is drawn 
+    """Elbow pixel for a knight L-arrow. The long (2-square) leg is drawn
     first, then the short (1-square) turn."""
     df = CBoard.get_file_idx(to_sq) - CBoard.get_file_idx(from_sq)
     dr = CBoard.get_rank_idx(to_sq) - CBoard.get_rank_idx(from_sq)
@@ -214,8 +231,14 @@ def draw_search_arrows(screen: pygame.Surface, pv: list):
         base = ARROW_BOT_SIDE if i % 2 == 0 else ARROW_PLAYER_SIDE
         alpha = max(45, 230 - i * 26)
         width = 11 if i < 2 else 7
-        _draw_arrow(overlay, sq_center(move[0]), sq_center(move[1]), (*base, alpha),
-                    width=width, elbow=_knight_elbow(move[0], move[1]))
+        _draw_arrow(
+            overlay,
+            sq_center(move[0]),
+            sq_center(move[1]),
+            (*base, alpha),
+            width=width,
+            elbow=_knight_elbow(move[0], move[1]),
+        )
     screen.blit(overlay, (0, 0))
 
 
@@ -241,12 +264,23 @@ def draw_top3_arrows(screen: pygame.Surface, multipv: list, stm_white: bool):
             continue
         # faint response chain first (so the bold root move draws on top)
         for j, move in enumerate(pv[1:4], start=1):
-            _draw_arrow(overlay, sq_center(move[0]), sq_center(move[1]),
-                        (*color, max(35, 120 - j * 25)), width=4,
-                        elbow=_knight_elbow(move[0], move[1]))
+            _draw_arrow(
+                overlay,
+                sq_center(move[0]),
+                sq_center(move[1]),
+                (*color, max(35, 120 - j * 25)),
+                width=4,
+                elbow=_knight_elbow(move[0], move[1]),
+            )
         root = pv[0]
-        _draw_arrow(overlay, sq_center(root[0]), sq_center(root[1]), (*color, 235),
-                    width=11, elbow=_knight_elbow(root[0], root[1]))
+        _draw_arrow(
+            overlay,
+            sq_center(root[0]),
+            sq_center(root[1]),
+            (*color, 235),
+            width=11,
+            elbow=_knight_elbow(root[0], root[1]),
+        )
         if entry.get("score") is not None:
             labels.append((sq_center(root[1]), _cp_label(entry["score"], stm_white), color))
     screen.blit(overlay, (0, 0))
@@ -277,12 +311,13 @@ def draw_density_cloud(screen: pygame.Surface, effort: dict):
         radius = int(12 + norm * (SQUARE_SIZE // 2 - 6))
         alpha = min(255, int(40 + norm * 150))
         pygame.draw.circle(overlay, (*DENSITY_COLOR, alpha), (cx, cy), radius)
-        pygame.draw.circle(overlay, (*DENSITY_COLOR, min(255, alpha + 60)),
-                           (cx, cy), radius, 3)
+        pygame.draw.circle(overlay, (*DENSITY_COLOR, min(255, alpha + 60)), (cx, cy), radius, 3)
     screen.blit(overlay, (0, 0))
 
 
-def draw_promotion_picker(screen: pygame.Surface, color: Color) -> list[tuple[pygame.Rect, PieceType]]:
+def draw_promotion_picker(
+    screen: pygame.Surface, color: Color
+) -> list[tuple[pygame.Rect, PieceType]]:
     """Draw the promotion picker overlay and return clickable rects."""
     overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
     overlay.fill((0, 0, 0, 160))
@@ -297,8 +332,12 @@ def draw_promotion_picker(screen: pygame.Surface, color: Color) -> list[tuple[py
 
     rects: list[tuple[pygame.Rect, PieceType]] = []
     font = pygame.font.SysFont(None, 22)
-    labels = {PieceType.QUEEN: "Queen", PieceType.ROOK: "Rook",
-              PieceType.BISHOP: "Bishop", PieceType.KNIGHT: "Knight"}
+    labels = {
+        PieceType.QUEEN: "Queen",
+        PieceType.ROOK: "Rook",
+        PieceType.BISHOP: "Bishop",
+        PieceType.KNIGHT: "Knight",
+    }
 
     for i, pt in enumerate(PROMO_PIECES):
         x = start_x + i * (box_w + 10)
@@ -321,7 +360,7 @@ def draw_game_over(screen: pygame.Surface, board: CBoard):
     screen.blit(overlay, (BOARD_ORIGIN_X, 0))
 
     font_big = pygame.font.SysFont(None, 72)
-    font_sm  = pygame.font.SysFont(None, 36)
+    font_sm = pygame.font.SysFont(None, 36)
 
     if board.winner is None:
         msg = "Stalemate - Draw"
@@ -332,15 +371,14 @@ def draw_game_over(screen: pygame.Surface, board: CBoard):
 
     cx = BOARD_ORIGIN_X + WIDTH // 2
     text = font_big.render(msg, True, (255, 255, 255))
-    sub  = font_sm.render("Press R to restart", True, (200, 200, 200))
+    sub = font_sm.render("Press R to restart", True, (200, 200, 200))
     screen.blit(text, text.get_rect(center=(cx, HEIGHT // 2 - 24)))
-    screen.blit(sub,  sub.get_rect(center=(cx, HEIGHT // 2 + 36)))
+    screen.blit(sub, sub.get_rect(center=(cx, HEIGHT // 2 + 36)))
 
 
 def draw_status(screen: pygame.Surface, board: CBoard, bot_thinking: bool, note: str):
     """Status bar under the board, spanning the eval bar + board width."""
-    your_turn = (not board.game_over and not bot_thinking and not note
-                 and board.turn == PLAYER_COLOR)
+    your_turn = not board.game_over and not bot_thinking and not note and board.turn == PLAYER_COLOR
     bar = pygame.Surface((MOVELIST_W, STATUS_H), pygame.SRCALPHA)
     bar.fill(STATUS_TURN_BG if your_turn else STATUS_BG)
     screen.blit(bar, (0, BOARD_PX))
@@ -362,8 +400,7 @@ def draw_status(screen: pygame.Surface, board: CBoard, bot_thinking: bool, note:
     screen.blit(text, (10, BOARD_PX + 8))
 
 
-def draw_captured_tray(screen: pygame.Surface, x: int, y: int, width: int,
-                       board: CBoard) -> int:
+def draw_captured_tray(screen: pygame.Surface, x: int, y: int, width: int, board: CBoard) -> int:
     """Each side's captured pieces and the net material advantage (no heading;
     the collapsible header supplies the title)."""
     material = {Color.WHITE: 0, Color.BLACK: 0}
@@ -395,8 +432,7 @@ def draw_captured_tray(screen: pygame.Surface, x: int, y: int, width: int,
 def main(args):
     pygame.init()
     screen = pygame.display.set_mode(
-        (WINDOW_W, WINDOW_H), 
-        pygame.SCALED | pygame.RESIZABLE | pygame.WINDOWMAXIMIZED
+        (WINDOW_W, WINDOW_H), pygame.SCALED | pygame.RESIZABLE | pygame.WINDOWMAXIMIZED
     )
     pygame.display.set_caption("ESCHESS")
     clock = pygame.time.Clock()
@@ -406,23 +442,32 @@ def main(args):
 
     # Availability of the optional backends, for greying out menu controls.
     avail = {
-        "cpp":       engine_backend.cpp_available(args.cpp_command),
-        "rust":      engine_backend.rust_available(args.rust_command),
-        "value":     engine_backend.has_weights("value"),
-        "policy":    engine_backend.has_weights("policy"),
-        "value_rl":  engine_backend.has_rl_weights("value"),
+        "cpp": engine_backend.cpp_available(args.cpp_command),
+        "rust": engine_backend.rust_available(args.rust_command),
+        "value": engine_backend.has_weights("value"),
+        "policy": engine_backend.has_weights("policy"),
+        "value_rl": engine_backend.has_rl_weights("value"),
         "policy_rl": engine_backend.has_rl_weights("policy"),
     }
 
     # Live-editable settings
-    applied = {"lang": args.lang, "search": args.search, "eval": args.eval,
-               "weights": args.weights, "depth": args.depth}  # current engine
-    pending = dict(applied)                                    # menu settings
+    applied = {
+        "lang": args.lang,
+        "search": args.search,
+        "eval": args.eval,
+        "weights": args.weights,
+        "depth": args.depth,
+    }  # current engine
+    pending = dict(applied)  # menu settings
 
     def build_engine(settings):
         return make_engine(
-            lang=settings["lang"], search=settings["search"], evaluator=settings["eval"],
-            device=args.device, cpp_command=args.cpp_command, rust_command=args.rust_command,
+            lang=settings["lang"],
+            search=settings["search"],
+            evaluator=settings["eval"],
+            device=args.device,
+            cpp_command=args.cpp_command,
+            rust_command=args.rust_command,
             weights_source=settings["weights"],
         )
 
@@ -435,7 +480,7 @@ def main(args):
     toggles = {"eval_bar": True, "last_move": True}
     collapsed = {"captured": False, "moves": False}
     show_extras = False
-    viz_mode = "pv"   # off | pv | top3 | density
+    viz_mode = "pv"  # off | pv | top3 | density
 
     selected_sq: int | None = None
     legal_mask: int = 0
@@ -444,7 +489,7 @@ def main(args):
     move_log: list[tuple] = []
     cursor = 0
     last_move: tuple[int, int] | None = None
-    move_scroll = 0          # rows scrolled up from the bottom of the list
+    move_scroll = 0  # rows scrolled up from the bottom of the list
     move_max_scroll = 0
 
     # Bot state: mutated from background thread via dict to avoid nonlocal rebinding
@@ -537,7 +582,7 @@ def main(args):
         engine = new_engine
         applied = dict(pending)
         status_note = ""
-        _apply_multipv()   # re-apply the current visualization to the new engine
+        _apply_multipv()  # re-apply the current visualization to the new engine
 
     def _analysis_ok() -> bool:
         """Top-3 / density need a tree search; the policy net has none."""
@@ -612,8 +657,7 @@ def main(args):
 
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 # 1) Menu / gear / section interactions are always available.
-                hit = next((hs for hs in menu_hotspots
-                            if hs.rect.collidepoint(event.pos)), None)
+                hit = next((hs for hs in menu_hotspots if hs.rect.collidepoint(event.pos)), None)
                 if hit is not None:
                     kind = hit.action[0]
                     if kind == "gear":
@@ -632,8 +676,9 @@ def main(args):
                         _set_pending(hit.action[1], hit.action[2])
                     elif kind == "depth":
                         _, lo, hi = hit.action
-                        _set_pending("depth",
-                                     sidebar.depth_from_click(hit.rect, event.pos[0], lo, hi))
+                        _set_pending(
+                            "depth", sidebar.depth_from_click(hit.rect, event.pos[0], lo, hi)
+                        )
                     continue
                 # Click outside an open extras menu closes it.
                 if show_extras and not gear_rect.collidepoint(event.pos):
@@ -650,8 +695,8 @@ def main(args):
                             board.make_move(promo_pending[0], promo_pending[1], promotion=pt)
                             _record_move((promo_pending[0], promo_pending[1], pt))
                             promo_pending = None
-                            selected_sq   = None
-                            legal_mask    = 0
+                            selected_sq = None
+                            legal_mask = 0
                             _check_game_over()
                             _trigger_bot()
                     continue
@@ -667,7 +712,7 @@ def main(args):
                     info = board.get_piece_at(clicked_sq)
                     if info and info[0] == board.turn:
                         selected_sq = clicked_sq
-                        legal_mask  = board.get_legal_moves(clicked_sq)
+                        legal_mask = board.get_legal_moves(clicked_sq)
                 else:
                     if legal_mask & (1 << clicked_sq):
                         if board.needs_promotion(selected_sq, clicked_sq):
@@ -676,24 +721,27 @@ def main(args):
                             board.make_move(selected_sq, clicked_sq)
                             _record_move((selected_sq, clicked_sq, None))
                             selected_sq = None
-                            legal_mask  = 0
+                            legal_mask = 0
                             _check_game_over()
                             _trigger_bot()
                     else:
                         info = board.get_piece_at(clicked_sq)
                         if info and info[0] == board.turn:
                             selected_sq = clicked_sq
-                            legal_mask  = board.get_legal_moves(clicked_sq)
+                            legal_mask = board.get_legal_moves(clicked_sq)
                         else:
                             selected_sq = None
-                            legal_mask  = 0
+                            legal_mask = 0
 
         # ── Draw ──────────────────────────────────────────────────────────────
         screen.fill(WINDOW_BG)
 
         if toggles["eval_bar"]:
-            score = probe.score if (probe.available and probe.score is not None) \
+            score = (
+                probe.score
+                if (probe.available and probe.score is not None)
                 else engine.last_info.get("score")
+            )
             eval_probe.draw_eval_bar(screen, pygame.Rect(0, 0, EVAL_BAR_W, BOARD_PX), score)
 
         draw_board(screen, selected_sq, last_move if toggles["last_move"] else None)
@@ -704,8 +752,11 @@ def main(args):
             if viz_mode == "pv":
                 draw_search_arrows(screen, engine.last_info.get("pv", []))
             elif viz_mode == "top3":
-                draw_top3_arrows(screen, engine.last_info.get("multipv", []),
-                                 engine.last_info.get("stm_white", True))
+                draw_top3_arrows(
+                    screen,
+                    engine.last_info.get("multipv", []),
+                    engine.last_info.get("stm_white", True),
+                )
             elif viz_mode == "density":
                 draw_density_cloud(screen, engine.last_info.get("effort", {}))
 
@@ -724,16 +775,18 @@ def main(args):
         mw = MENU_W - 2 * sidebar.PAD
         my = 12
 
-        my, hs = sidebar.draw_engine_settings(screen, mx, my, mw, pending, avail,
-                                              pending != applied)
+        my, hs = sidebar.draw_engine_settings(
+            screen, mx, my, mw, pending, avail, pending != applied
+        )
         menu_hotspots.extend(hs)
         my = sidebar.draw_performance(screen, mx, my, mw, engine.last_info)
 
         my, hs = sidebar.draw_visualization(screen, mx, my, mw, viz_mode, _analysis_ok())
         menu_hotspots.extend(hs)
 
-        hs, my = sidebar.draw_collapsible_header(screen, mx, my, mw, "Captured",
-                                                 collapsed["captured"], "captured")
+        hs, my = sidebar.draw_collapsible_header(
+            screen, mx, my, mw, "Captured", collapsed["captured"], "captured"
+        )
         menu_hotspots.extend(hs)
         if not collapsed["captured"]:
             my = draw_captured_tray(screen, mx, my, mw, board)
@@ -746,12 +799,14 @@ def main(args):
         mlx = sidebar.PAD
         mlw = MOVELIST_W - 2 * sidebar.PAD
         hs, body_y = sidebar.draw_collapsible_header(
-            screen, mlx, MOVELIST_Y + 6, mlw, "Moves", collapsed["moves"], "moves", nav=True)
+            screen, mlx, MOVELIST_Y + 6, mlw, "Moves", collapsed["moves"], "moves", nav=True
+        )
         menu_hotspots.extend(hs)
         if not collapsed["moves"]:
             list_rect = pygame.Rect(mlx, body_y, mlw, WINDOW_H - body_y - sidebar.PAD)
-            move_max_scroll = sidebar.draw_move_list(screen, list_rect, move_log,
-                                                     cursor, move_scroll)
+            move_max_scroll = sidebar.draw_move_list(
+                screen, list_rect, move_log, cursor, move_scroll
+            )
 
         pygame.display.flip()
         clock.tick(FPS)
@@ -765,16 +820,32 @@ def main(args):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Play chess against the eschess bot.")
-    parser.add_argument("--lang", choices=("py", "cpp", "rust"), default="py",
-                        help="bot implementation: in-process Python, or external C++/Rust UCI binary")
-    parser.add_argument("--search", choices=("alphabeta", "policy"), default="alphabeta",
-                        help="Python move source: alpha-beta tree search or the policy network")
-    parser.add_argument("--eval", choices=("simple", "medium", "complex", "nn"), default="medium",
-                        help="evaluation for alpha-beta search; 'nn' is the value network "
-                             "(ignored when --search policy or --lang cpp)")
-    parser.add_argument("--weights", choices=("supervised", "rl"), default="supervised",
-                        help="network checkpoints for 'nn' eval / 'policy' search: "
-                             "supervised (nn/weights) or self-play RL (nn/weights/rl)")
+    parser.add_argument(
+        "--lang",
+        choices=("py", "cpp", "rust"),
+        default="py",
+        help="bot implementation: in-process Python, or external C++/Rust UCI binary",
+    )
+    parser.add_argument(
+        "--search",
+        choices=("alphabeta", "policy"),
+        default="alphabeta",
+        help="Python move source: alpha-beta tree search or the policy network",
+    )
+    parser.add_argument(
+        "--eval",
+        choices=("simple", "medium", "complex", "nn"),
+        default="medium",
+        help="evaluation for alpha-beta search; 'nn' is the value network "
+        "(ignored when --search policy or --lang cpp)",
+    )
+    parser.add_argument(
+        "--weights",
+        choices=("supervised", "rl"),
+        default="supervised",
+        help="network checkpoints for 'nn' eval / 'policy' search: "
+        "supervised (nn/weights) or self-play RL (nn/weights/rl)",
+    )
     parser.add_argument("--depth", type=int, default=BOT_DEPTH, help="bot search depth")
     parser.add_argument("--device", default="cpu", help="torch device for the networks")
     parser.add_argument("--cpp-command", default=None, help="override the C++ UCI binary path")
