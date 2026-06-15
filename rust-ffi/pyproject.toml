@@ -1,0 +1,17 @@
+[build-system]
+requires = ["maturin>=1.5,<2"]
+build-backend = "maturin"
+
+[project]
+name = "eschess-native"
+version = "0.1.0"
+description = "Native PyO3 chess engine + AlphaZero self-play for eschess ML training."
+requires-python = ">=3.12"
+# numpy is needed at runtime to construct/consume the arrays crossing the FFI
+# boundary; torch (the actual NN inference) stays an eschess `nn`-extra concern.
+dependencies = ["numpy>=1.24"]
+
+[tool.maturin]
+module-name = "eschess_native"
+# Build an abi3 wheel so a single artifact works across CPython >= 3.12.
+features = ["pyo3/extension-module"]

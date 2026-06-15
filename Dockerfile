@@ -44,6 +44,16 @@ RUN cargo build --release --manifest-path rust/Cargo.toml
 # Sanity-check move generation matches the reference perft counts at build time.
 RUN cpp/build/perft >/dev/null && rust/target/release/perft >/dev/null
 
+# Build the native PyO3 extension (eschess_native) into an abi3 wheel, and gate
+# the build on a perft parity smoke so a broken binding fails the image build.
+COPY rust-ffi/ rust-ffi/
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip3 install --break-system-packages maturin \
+    && maturin build --release -m rust-ffi/Cargo.toml --out /wheels \
+    && pip3 install --break-system-packages /wheels/*.whl \
+    && python3 -c "import eschess_native as e; assert e.PyBoard().perft(3) == 8902; print('eschess_native perft OK')"
+
 # ── Stage 2: the runtime image ───────────────────────────────────────────────
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
@@ -72,6 +82,12 @@ RUN uv sync --frozen --no-install-project
 COPY . .
 # `bench` adds matplotlib for harness/telemetry.py plots.
 RUN uv sync --frozen --extra bench
+
+# Install the prebuilt native extension into the project venv so the RL loop can
+# use the fast self-play backend (`python -m nn.rl --backend native`). Pulls in
+# numpy; torch (the actual NN inference) still comes from the `nn` extra.
+COPY --from=engines /wheels /tmp/wheels
+RUN uv pip install --python /app/.venv/bin/python /tmp/wheels/*.whl && rm -rf /tmp/wheels
 
 # Drop the compiled C++/Rust engines at the paths the harness + GUI expect
 # (cpp/build/uci, rust/target/release/uci). Placed after `COPY . .` so the

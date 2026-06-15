@@ -33,6 +33,7 @@ from engine.board import CBoard, Color, PieceType
 from engine_backend import _latest_weights, _WEIGHTS_DIR
 from .encoding import POLICY_SIZE
 from .mcts import MCTS, select_move
+from .native import HAS_NATIVE, NativeSelfPlay
 from .network import PolicyNet, ValueNet
 from .selfplay import SelfPlaySample, game_outcome, play_game
 
@@ -150,6 +151,20 @@ def evaluate_gate(candidate: tuple[PolicyNet, ValueNet], best: tuple[PolicyNet, 
 
 # -- Orchestration -----------------------------------------------------------
 
+def _resolve_backend(backend: str) -> bool:
+    """Return True to use the native self-play engine, False for pure Python."""
+    if backend == "python":
+        return False
+    if backend == "native":
+        if not HAS_NATIVE:
+            raise RuntimeError(
+                "--backend native requested but eschess_native is not installed. "
+                "Build it with `uv run --extra nn maturin develop --release "
+                "-m rust-ffi/Cargo.toml` or `uv sync --extra ffi`.")
+        return True
+    return HAS_NATIVE   # auto: prefer native when available
+
+
 def _load_net(net, path: Path, device: str):
     net.load_state_dict(torch.load(path, map_location=device))
     return net.to(device).eval()
@@ -169,6 +184,9 @@ def run_rl(args: argparse.Namespace) -> None:
     best_policy = _load_net(PolicyNet(num_res_blocks=args.res_blocks), policy_path, device)
     best_value  = _load_net(ValueNet(num_res_blocks=args.res_blocks), value_path, device)
 
+    use_native = _resolve_backend(args.backend)
+    print(f"self-play backend: {'native (eschess_native)' if use_native else 'python'}", flush=True)
+
     _RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     csv_path = _RESULTS_DIR / f"{stamp}_rl_training.csv"
@@ -178,12 +196,20 @@ def run_rl(args: argparse.Namespace) -> None:
 
     buffer: list[list[SelfPlaySample]] = []
     for generation in range(1, args.generations + 1):
-        selfplay_mcts = MCTS(best_policy, best_value, device,
-                             n_simulations=args.sims, c_puct=args.c_puct)
-        gen_samples: list[SelfPlaySample] = []
-        for _ in range(args.games_per_gen):
-            gen_samples.extend(play_game(selfplay_mcts, max_moves=args.max_moves,
-                                         temp_moves=args.temp_moves, temperature=args.temperature))
+        if use_native:
+            native = NativeSelfPlay(best_policy, best_value, device,
+                                    sims=args.sims, c_puct=args.c_puct,
+                                    temperature=args.temperature, temp_moves=args.temp_moves,
+                                    max_moves=args.max_moves)
+            gen_samples = native.generate(args.games_per_gen,
+                                          seed=args.seed + generation * args.games_per_gen)
+        else:
+            selfplay_mcts = MCTS(best_policy, best_value, device,
+                                 n_simulations=args.sims, c_puct=args.c_puct)
+            gen_samples = []
+            for _ in range(args.games_per_gen):
+                gen_samples.extend(play_game(selfplay_mcts, max_moves=args.max_moves,
+                                             temp_moves=args.temp_moves, temperature=args.temperature))
         buffer.append(gen_samples)
         del buffer[:-args.buffer_gens]
         train_samples = [s for gen in buffer for s in gen]
@@ -247,6 +273,9 @@ def main() -> None:
     parser.add_argument("--init-value", default=None, help="warm-start value weights (default: latest supervised)")
     parser.add_argument("--res-blocks", type=int, default=4, help="must match the warm-start checkpoints")
     parser.add_argument("--device", default="cpu", help="torch device")
+    parser.add_argument("--backend", choices=["auto", "native", "python"], default="auto",
+                        help="self-play engine: native eschess_native, pure python, or auto-detect")
+    parser.add_argument("--seed", type=int, default=0, help="base RNG seed for native self-play")
     parser.add_argument("--out-dir", default=None, help="override the metrics-CSV directory")
     args = parser.parse_args()
 

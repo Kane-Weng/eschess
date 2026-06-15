@@ -453,6 +453,9 @@ dependencies = [
 bench = [
     { name = "matplotlib" },
 ]
+ffi = [
+    { name = "eschess-native" },
+]
 nn = [
     { name = "datasets" },
     { name = "numpy" },
@@ -462,12 +465,24 @@ nn = [
 [package.metadata]
 requires-dist = [
     { name = "datasets", marker = "extra == 'nn'", specifier = ">=2.14" },
+    { name = "eschess-native", marker = "extra == 'ffi'", directory = "rust-ffi" },
     { name = "matplotlib", marker = "extra == 'bench'", specifier = ">=3.7" },
     { name = "numpy", marker = "extra == 'nn'", specifier = ">=1.24" },
     { name = "pygame", specifier = ">=2.6.1" },
     { name = "torch", marker = "extra == 'nn'", specifier = ">=2.0" },
 ]
-provides-extras = ["nn", "bench"]
+provides-extras = ["nn", "bench", "ffi"]
+
+[[package]]
+name = "eschess-native"
+version = "0.1.0"
+source = { directory = "rust-ffi" }
+dependencies = [
+    { name = "numpy" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "numpy", specifier = ">=1.24" }]
 
 [[package]]
 name = "filelock"
