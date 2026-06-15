@@ -4,13 +4,20 @@
 # Author: Kane Weng
 #
 # Benchmark Eschess against a dialed-down Stockfish using cutechess-cli, then
-# rate the result with Ordo (falling back to harness/elo.py). This is the
-# "production" testing path; all of these tools are preinstalled in the
-# Docker image (see README.md).
+# rate the result with Ordo (falling back to harness/elo.py).
 #
-# Usage:
-#   harness/run_cutechess.sh [GAMES] [TIME_CONTROL] [STOCKFISH_ELO]
-#   harness/run_cutechess.sh 100 20+0.2 1320
+# cutechess-cli, Stockfish, and Ordo are only bundled in the Docker image, so
+# this is the "production" path: run it in the container. The PGN is written to
+# harness/results/, so mount that dir to keep it on the host.
+#
+# Usage (in Docker):
+#   docker run --rm -v "$PWD/harness/results:/app/harness/results" eschess \
+#       harness/run_cutechess.sh [GAMES] [TIME_CONTROL] [STOCKFISH_ELO]
+#   docker run --rm -v "$PWD/harness/results:/app/harness/results" eschess \
+#       harness/run_cutechess.sh 100 20+0.2 1320
+#
+# (Locally it needs cutechess-cli + stockfish + ordo on PATH; otherwise prefer
+#  the pure-Python harness/match.py path.)
 
 set -euo pipefail
 
@@ -19,7 +26,9 @@ TC="${2:-20+0.2}"        # cutechess clock control: base+increment, in seconds
 SF_ELO="${3:-1320}"
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PGN="${REPO_DIR}/results.pgn"
+RESULTS_DIR="${REPO_DIR}/harness/results"
+mkdir -p "${RESULTS_DIR}"
+PGN="${RESULTS_DIR}/cutechess_$(date +%Y%m%d_%H%M%S).pgn"
 ROUNDS=$(( (GAMES + 1) / 2 ))   # 2 games per round (-repeat swaps colours)
 
 for tool in cutechess-cli stockfish; do

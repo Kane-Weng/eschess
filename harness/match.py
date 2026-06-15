@@ -10,14 +10,32 @@ Eschess's own CBoard acts as the referee (legality, checkmate, stalemate, 50-mov
 threefold repetition, insufficient material). Results are written as a PGN that
 harness/elo.py (or Ordo / BayesElo) can rate.
 
-Example => Eschess vs a 1320-rated Stockfish, 100 games at 100ms/move:
+Engine commands are arbitrary shell strings, so any matchup works. For the local
+eschess engine you choose the move source and evaluation inline, e.g.
+"python3 python/uci.py --search alphabeta --eval complex" (eval = simple / medium
+/ complex / nn); the C++/Rust ports take no flags (fixed medium eval). Time per
+move is set match-wide with --movetime (the runner issues "go movetime") and TT
+size through --opt1/--opt2 Hash=N. There is no per-engine fixed-depth knob.
 
+The PGN defaults to a timestamped file under harness/results/ (override --pgn).
+
+An eschess-vs-eschess match needs nothing extra. Stockfish is only bundled in the
+Docker image, so benchmark against it there; mount harness/results to keep the PGN
+on the host.
+
+    # local: two eschess configs (writes harness/results/match_<ts>_...pgn)
     python harness/match.py \
-        --engine1 "python3 uci.py" --name1 Eschess \
-        --engine2 "stockfish" --name2 SF-1320 \
-        --opt2 UCI_LimitStrength=true --opt2 UCI_Elo=1320 \
-        --games 100 --movetime 100 \
-        --openings harness/openings.epd --pgn results.pgn
+        --engine1 "python3 python/uci.py --eval complex" --name1 Eschess-complex \
+        --engine2 "python3 python/uci.py --eval medium"  --name2 Eschess-medium \
+        --games 100 --movetime 100 --openings harness/openings.epd
+
+    # vs Stockfish, via Docker (PGN lands in harness/results/ on the host)
+    docker run --rm -v "$PWD/harness/results:/app/harness/results" eschess \
+        python harness/match.py \
+            --engine1 "python3 python/uci.py" --name1 Eschess \
+            --engine2 stockfish --name2 SF-1320 \
+            --opt2 UCI_LimitStrength=true --opt2 UCI_Elo=1320 \
+            --games 100 --movetime 100 --openings harness/openings.epd
 """
 
 import argparse
@@ -26,12 +44,15 @@ import subprocess
 import sys
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "python"))
 
 from engine.board import CBoard, Color, PieceType, STARTPOS_FEN, bits_to_squares  # noqa: E402
 from uci import move_to_uci, uci_to_move                                          # noqa: E402
+
+_RESULTS_DIR = Path(__file__).resolve().parent / "results"
 
 
 class UCIProcess:
@@ -218,13 +239,25 @@ def main() -> None:
     ap.add_argument("--movetime", type=int, default=100, help="ms per move (fixed time)")
     ap.add_argument("--max-plies", type=int, default=400, help="adjudicate a draw past this many plies")
     ap.add_argument("--openings", default=None, help="EPD/FEN opening suite (one per line)")
-    ap.add_argument("--pgn", default="results.pgn")
+    ap.add_argument("--pgn", default=None,
+                    help="output PGN path (default: harness/results/match_<ts>_<n1>_vs_<n2>.pgn)")
     ap.add_argument("--concurrency", type=int, default=1, help="number of games to play in parallel")
     args = ap.parse_args()
 
     openings = load_openings(args.openings)
     go_command = f"go movetime {args.movetime}"
     opts1, opts2 = _parse_opts(args.opt1), _parse_opts(args.opt2)
+
+    # PGN defaults to a timestamped file under harness/results/ so runs (including
+    # in Docker, with that dir mounted) leave their output in one place.
+    if args.pgn is None:
+        def _slug(s: str) -> str:
+            return "".join(c if c.isalnum() or c in "-._" else "_" for c in s)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        pgn_path = _RESULTS_DIR / f"match_{ts}_{_slug(args.name1)}_vs_{_slug(args.name2)}.pgn"
+    else:
+        pgn_path = Path(args.pgn)
+    pgn_path.parent.mkdir(parents=True, exist_ok=True)
 
     # One queue of game indices; each worker owns its own engine pair and drains it.
     work_q: "queue.Queue[int]" = queue.Queue()
@@ -236,7 +269,7 @@ def main() -> None:
     stats = {"wins": 0, "losses": 0, "draws": 0, "done": 0}
     lock = threading.Lock()
     started = time.time()
-    pgn = open(args.pgn, "w")
+    pgn = open(pgn_path, "w")
 
     def worker() -> None:
         e1 = UCIProcess(args.engine1, args.name1, opts1)
@@ -283,7 +316,7 @@ def main() -> None:
     print(f"\nFinished {n} games in {time.time() - started:.1f}s  (concurrency {num_workers})")
     print(f"{args.name1}: +{stats['wins']} -{stats['losses']} ={stats['draws']}  "
           f"score {score}/{n} = {score / n:.1%}")
-    print(f"PGN written to {args.pgn}  ->  rate it with: python harness/elo.py {args.pgn}")
+    print(f"PGN written to {pgn_path}  ->  rate it with: python harness/elo.py {pgn_path}")
 
 
 if __name__ == "__main__":

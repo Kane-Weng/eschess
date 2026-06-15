@@ -114,35 +114,31 @@ engines (`cpp/build/uci`, `rust/target/release/uci`), so the entire
 cross-language pipeline (matches, telemetry, ACL vs Stockfish) is reproducible
 with no host setup.
 
+All harness scripts write their output (PGNs, logs, telemetry CSV/PNG, ACL CSV)
+to `harness/results/`. Mount that directory so the output lands on the host;
+otherwise it disappears with `--rm`.
+
 ```bash
 docker build -t eschess .
 
 # Run the engine as a UCI process
 docker run --rm -i eschess python python/uci.py
 
-# Benchmark vs a strength-limited Stockfish
-docker run --rm eschess python harness/benchmark.py --a-eval medium --stockfish 1320 --games 100
+# Benchmark vs a strength-limited Stockfish (PGN + log → harness/results/)
+docker run --rm -v "$PWD/harness/results:/app/harness/results" eschess \
+    python harness/benchmark.py --a-eval medium --stockfish 1320 --games 100
 
-# Cross-language throughput, and move quality vs Stockfish
-docker run --rm eschess python harness/telemetry.py --depth 7
-docker run --rm eschess bash -c '\
+# Cross-language throughput (CSV + PNG → harness/results/)
+docker run --rm -v "$PWD/harness/results:/app/harness/results" eschess \
+    python harness/telemetry.py --depth 7 --plot
+
+# Move quality vs Stockfish: play a few games, then score ACL (PGN + CSV → harness/results/)
+docker run --rm -v "$PWD/harness/results:/app/harness/results" eschess bash -c '
     python harness/match.py --engine1 cpp/build/uci --name1 eschess-cpp \
         --engine2 stockfish --name2 SF-1350 --opt2 UCI_LimitStrength=true \
-        --opt2 UCI_Elo=1350 --games 4 --movetime 100 --pgn /tmp/g.pgn && \
-    python harness/acl.py /tmp/g.pgn --ref stockfish --ref-depth 12'
+        --opt2 UCI_Elo=1350 --games 4 --movetime 100 --pgn harness/results/g.pgn && \
+    python harness/acl.py harness/results/g.pgn --ref stockfish --ref-depth 12'
 ```
-
-The benchmark writes its PGN to `results.pgn` *inside* the container, so with
-`--rm` it disappears when the run ends. To keep it, mount a host directory and
-copy it out:
-
-```bash
-docker run --rm -v "$PWD:/out" eschess \
-    bash -c "python harness/benchmark.py --a-eval medium --stockfish 1320 --games 100 && cp results.pgn /out/"
-```
-
-(Running the harness locally instead writes `results.pgn` straight into your
-working directory.)
 
 ## Benchmarking & Elo
 
@@ -154,49 +150,65 @@ material), and writes a PGN:
 uv run python harness/match.py \
     --engine1 "python3 python/uci.py" --name1 EschessA \
     --engine2 "python3 python/uci.py" --name2 EschessB \
-    --games 100 --movetime 100 --concurrency 4 \
-    --openings harness/openings.epd --pgn results.pgn
+    --games 100 --movetime 100 --concurrency 4 --openings harness/openings.epd
 ```
 
-`--concurrency N` plays N games in parallel (each worker owns its own engine
-pair). The engine config is chosen on the command line, so any matchup works,
-e.g. `--engine1 "python3 python/uci.py --eval nn"` (value network) or
-`--engine2 "python3 python/uci.py --search policy"` (policy network).
+`--concurrency N` plays N games in parallel. The engine config lives inside the
+engine command, so any matchup works: choose the evaluation with `--eval
+simple|medium|complex|nn` and the move source with `--search alphabeta|policy`
+(e.g. `--engine1 "python3 python/uci.py --eval complex"`), and set the TT size
+with `--opt1/--opt2 Hash=N`. Time per move is the match-wide `--movetime` — there
+is no per-engine depth flag, and the C++/Rust binaries take no flags (fixed
+medium eval). The PGN defaults to `harness/results/` (override with `--pgn`).
 
-Point `--engine2` at Stockfish (capped to 1320 Elo) for a real benchmark:
+Point `--engine2` at Stockfish for a real benchmark. Stockfish ships only in the
+Docker image, so run it there — mounting `harness/results` keeps the PGN on the
+host:
 
 ```bash
-uv run python harness/match.py \
-    --engine1 "python3 python/uci.py" --name1 Eschess \
-    --engine2 "stockfish"             --name2 SF-1320 \
-    --opt2 UCI_LimitStrength=true --opt2 UCI_Elo=1320 \
-    --games 100 --movetime 100 --openings harness/openings.epd --pgn results.pgn
+docker run --rm -v "$PWD/harness/results:/app/harness/results" eschess \
+    python harness/match.py \
+        --engine1 "python3 python/uci.py" --name1 Eschess \
+        --engine2 stockfish --name2 SF-1320 \
+        --opt2 UCI_LimitStrength=true --opt2 UCI_Elo=1320 \
+        --games 100 --movetime 100 --openings harness/openings.epd
 ```
 
-**Rate the results.** For two engines this reports the score, Elo difference ±
-95% margin, the confidence interval, likelihood-of-superiority, and draw rate;
-for three or more it solves a Bradley-Terry model for a full rating table:
+**Rate the results.** `elo.py` has no external dependencies, so run it locally on
+the PGN that the match left in `harness/results/`. For two engines it reports the
+score, Elo difference ± 95% margin, the confidence interval,
+likelihood-of-superiority, and draw rate; for three or more it solves a
+Bradley-Terry model for a full rating table:
 
 ```bash
-uv run python harness/elo.py results.pgn --anchor SF-1320 --anchor-elo 1320
+uv run python harness/elo.py harness/results/<run>.pgn --anchor SF-1320 --anchor-elo 1320
 ```
 
 **Benchmark the ML model (one shot).** `harness/benchmark.py` wraps the
-match-then-rate flow and builds the engine commands for you. ML configs (`nn`
-evaluation, `policy` search) need the torch deps, so run under the `nn` extra:
+match-then-rate flow and builds the engine commands for you, writing a timestamped
+run folder (PGN + log) to `harness/results/`. ML configs (`nn` evaluation,
+`policy` search) need the torch deps (`--extra nn`); `--stockfish` benchmarks need
+Stockfish, so run those in Docker (the image bundles both):
 
 ```bash
-# value network vs the medium handcrafted eval
+# value network vs the medium handcrafted eval (local, no external tools)
 uv run --extra nn python harness/benchmark.py --a-eval nn --b-eval medium \
     --games 100 --movetime 100 --concurrency 4
 
-# policy network vs a 1320 Stockfish
-uv run --extra nn python harness/benchmark.py --a-search policy --stockfish 1320 \
-    --games 100 --concurrency 4
+# policy network vs a 1320 Stockfish (Docker; run folder → harness/results/)
+docker run --rm -v "$PWD/harness/results:/app/harness/results" eschess \
+    python harness/benchmark.py --a-search policy --stockfish 1320 \
+        --games 100 --concurrency 4
 ```
 
 **Standard tooling.** `harness/run_cutechess.sh` drives the same benchmark
-through `cutechess-cli` and rates it with Ordo.
+through `cutechess-cli` and rates it with Ordo. Those tools ship only in the
+Docker image, so run it there (PGN → `harness/results/`):
+
+```bash
+docker run --rm -v "$PWD/harness/results:/app/harness/results" eschess \
+    harness/run_cutechess.sh 100 20+0.2 1320
+```
 
 **Cross-language telemetry.** `harness/telemetry.py` drives the Python, C++, and
 Rust engines over UCI on a shared set of positions and reports nodes-per-second,
@@ -212,10 +224,13 @@ uv run --extra bench python harness/telemetry.py --depth 6 --cache --plot
 **Move quality (Average Centipawn Loss).** `harness/acl.py` scores the moves in a
 played PGN against a strong reference engine (Stockfish), reporting ACL split by
 game phase (opening / middlegame / endgame) and by player — how much worse each
-played move was than the reference's best:
+played move was than the reference's best. The reference is Stockfish, so run it
+in Docker; the per-player/phase table is also written to a CSV in
+`harness/results/`:
 
 ```bash
-uv run python harness/acl.py harness/results/<run>/games.pgn --ref stockfish --ref-depth 14
+docker run --rm -v "$PWD/harness/results:/app/harness/results" eschess \
+    python harness/acl.py harness/results/<run>.pgn --ref stockfish --ref-depth 14
 ```
 
 **Notes**

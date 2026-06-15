@@ -10,17 +10,24 @@ the PGN.
 Engine A and engine B are eschess configs by default (alpha-beta with an
 evaluation level, or the policy net). Point B at Stockfish with --stockfish ELO.
 
+Each run writes a timestamped folder under harness/results/ holding the PGN and a
+full log, so a detached run leaves everything to read afterwards.
+
 Examples:
-    # value network vs the medium handcrafted eval
+    # value network vs the medium handcrafted eval (no external tools needed)
     uv run --extra nn python harness/benchmark.py --a-eval nn --b-eval medium --games 100
 
-    # policy network vs a 1320 Stockfish, 4 games at a time
-    uv run --extra nn python harness/benchmark.py --a-search policy --stockfish 1320 \
-        --games 100 --concurrency 4
+--stockfish needs Stockfish, which is only bundled in the Docker image, so run
+those benchmarks there. Mount harness/results so the run folder lands on the host:
+
+    # policy network vs a 1320 Stockfish, via Docker, 4 games at a time
+    docker run --rm -v "$PWD/harness/results:/app/harness/results" eschess \
+        python harness/benchmark.py --a-search policy --stockfish 1320 \
+            --games 100 --concurrency 4
 
 ML configs (eval nn / search policy) need the torch deps, so run under the nn
 extra: that way this interpreter (sys.executable) can import torch, and the
-engine subprocesses inherit it.
+engine subprocesses inherit it. (The Docker image already includes them.)
 """
 
 import argparse
