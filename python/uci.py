@@ -91,6 +91,7 @@ class UCIEngine:
         self._eval    = evaluator
         self._device  = device
         self._hash_mb = 32
+        self._multipv = 1
         self._build_engine()
 
     def _build_engine(self) -> None:
@@ -137,6 +138,7 @@ class UCIEngine:
         print(f"id name {ENGINE_NAME}")
         print(f"id author {ENGINE_AUTHOR}")
         print("option name Hash type spin default 32 min 1 max 1024")
+        print("option name MultiPV type spin default 1 min 1 max 5")
         print("uciok", flush=True)
 
     def _cmd_setoption(self, rest: str) -> None:
@@ -146,6 +148,8 @@ class UCIEngine:
             if name.lower() == "hash" and self._is_search:
                 self._hash_mb = max(1, int(value))
                 self._build_engine()
+            elif name.lower() == "multipv":
+                self._multipv = max(1, int(value))
 
     def _cmd_position(self, rest: str) -> None:
         tokens = rest.split()
@@ -174,6 +178,10 @@ class UCIEngine:
         params = self._parse_go(rest)
         max_depth, time_limit_ms = self._plan_time(params)
 
+        if self._multipv > 1 and hasattr(self.engine, "analyze"):
+            self._go_multipv(max_depth)
+            return
+
         white = self.board.turn == Color.WHITE
 
         def emit_info(depth: int, score: float, nodes: int, elapsed: float, pv: list) -> None:
@@ -190,6 +198,26 @@ class UCIEngine:
             info_callback=emit_info,
         )
         print(f"bestmove {move_to_uci(best_move) if best_move else '0000'}", flush=True)
+
+    def _go_multipv(self, max_depth: int) -> None:
+        white = self.board.turn == Color.WHITE
+        depth = max_depth if max_depth and max_depth < 64 else 4
+        results = self.engine.analyze(self.board, depth)
+        if not results:
+            print("bestmove 0000", flush=True)
+            return
+        total_nodes = sum(r["nodes"] for r in results)
+        for i, r in enumerate(results[:self._multipv], start=1):
+            pv_text = " ".join(move_to_uci(m) for m in r["pv"])
+            print(
+                f"info multipv {i} depth {depth} "
+                f"score {_score_to_uci(r['score'], white, len(r['pv']))} "
+                f"nodes {total_nodes} pv {pv_text}",
+                flush=True,
+            )
+        effort = " ".join(f"{move_to_uci(r['move'])}:{r['nodes']}" for r in results)
+        print(f"info string effort {effort}", flush=True)
+        print(f"bestmove {move_to_uci(results[0]['move'])}", flush=True)
 
     def _go_policy(self) -> None:
         """The policy net picks a move directly; there is no tree to search."""

@@ -7,7 +7,8 @@ use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
 
 use eschess::board::{CBoard, STARTPOS_FEN};
-use eschess::search::Search;
+use eschess::evaluate::make_evaluator;
+use eschess::search::{Search, MAX_PLY};
 use eschess::types::*;
 
 const ENGINE_NAME: &str = "Eschess-rust";
@@ -85,6 +86,8 @@ struct UCIEngine {
     board: CBoard,
     search: Search,
     hash_mb: usize,
+    eval_level: String,
+    multipv: usize,
 }
 
 impl UCIEngine {
@@ -93,6 +96,8 @@ impl UCIEngine {
             board: CBoard::from_fen(STARTPOS_FEN),
             search: Search::new(None, 32),
             hash_mb: 32,
+            eval_level: "medium".to_string(),
+            multipv: 1,
         }
     }
 
@@ -133,6 +138,8 @@ impl UCIEngine {
         println!("id name {}", ENGINE_NAME);
         println!("id author {}", ENGINE_AUTHOR);
         println!("option name Hash type spin default 32 min 1 max 1024");
+        println!("option name Eval type combo default medium var simple var medium var complex");
+        println!("option name MultiPV type spin default 1 min 1 max 5");
         println!("uciok");
     }
 
@@ -140,10 +147,18 @@ impl UCIEngine {
         let tokens: Vec<&str> = rest.split_whitespace().collect();
         if tokens.len() >= 4 && tokens[0] == "name" && tokens[tokens.len() - 2] == "value" {
             let name = tokens[1].to_lowercase();
+            let value = tokens[tokens.len() - 1].to_lowercase();
             if name == "hash" {
-                if let Ok(v) = tokens[tokens.len() - 1].parse::<usize>() {
+                if let Ok(v) = value.parse::<usize>() {
                     self.hash_mb = v.max(1);
-                    self.search = Search::new(None, self.hash_mb);
+                    self.search = Search::new(Some(make_evaluator(&self.eval_level)), self.hash_mb);
+                }
+            } else if name == "eval" {
+                self.eval_level = value;
+                self.search = Search::new(Some(make_evaluator(&self.eval_level)), self.hash_mb);
+            } else if name == "multipv" {
+                if let Ok(v) = value.parse::<usize>() {
+                    self.multipv = v.max(1);
                 }
             }
         }
@@ -228,6 +243,12 @@ impl UCIEngine {
         let (max_depth, time_limit_ms) = self.plan_time(&params, infinite);
         let white = self.board.turn == WHITE;
 
+        if self.multipv > 1 {
+            let depth = if max_depth < MAX_PLY as i32 { max_depth } else { 4 };
+            self.go_multipv(depth, white);
+            return;
+        }
+
         let mut emit = |depth: i32, score: f64, nodes: i64, elapsed: f64, pv: &[Move]| {
             let nps = if elapsed > 0.0 {
                 (nodes as f64 / elapsed) as i64
@@ -258,6 +279,34 @@ impl UCIEngine {
                 "0000".to_string()
             }
         );
+    }
+
+    fn go_multipv(&mut self, depth: i32, white: bool) {
+        let results = self.search.analyze(&mut self.board, depth);
+        if results.is_empty() {
+            println!("bestmove 0000");
+            return;
+        }
+        let total_nodes: i64 = results.iter().map(|r| r.node_count).sum();
+        let k = self.multipv.min(results.len());
+        for (i, r) in results.iter().take(k).enumerate() {
+            let pv_text: Vec<String> = r.pv.iter().map(move_to_uci).collect();
+            println!(
+                "info multipv {} depth {} score {} nodes {} pv {}",
+                i + 1,
+                depth,
+                score_to_uci(r.score, white, r.pv.len()),
+                total_nodes,
+                pv_text.join(" ")
+            );
+        }
+        let effort: Vec<String> = results
+            .iter()
+            .map(|r| format!("{}:{}", move_to_uci(&r.mv), r.node_count))
+            .collect();
+        println!("info string effort {}", effort.join(" "));
+        println!("bestmove {}", move_to_uci(&results[0].mv));
+        io::stdout().flush().ok();
     }
 }
 

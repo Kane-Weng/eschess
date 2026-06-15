@@ -20,10 +20,11 @@ trained policy network. Both load the most recent weights from nn/weights unless
 an explicit path is given.
 """
 
+import shlex
 import subprocess
 from pathlib import Path
 
-from engine.board import PieceType, name_to_square
+from engine.board import Color, PieceType, name_to_square
 
 _PYTHON_DIR  = Path(__file__).resolve().parent
 _REPO_ROOT   = _PYTHON_DIR.parent
@@ -31,6 +32,23 @@ _WEIGHTS_DIR = _PYTHON_DIR / "nn" / "weights"
 
 DEFAULT_CPP_COMMAND = str(_REPO_ROOT / "cpp" / "build" / "uci")
 DEFAULT_RUST_COMMAND = str(_REPO_ROOT / "rust" / "target" / "release" / "uci")
+
+
+# -- Availability checks (used by the GUI to grey out impossible options) -----
+
+def cpp_available(command: str | None = None) -> bool:
+    """True when the compiled C++ UCI binary exists."""
+    return Path(shlex.split(command or DEFAULT_CPP_COMMAND)[0]).exists()
+
+
+def rust_available(command: str | None = None) -> bool:
+    """True when the compiled Rust UCI binary exists."""
+    return Path(shlex.split(command or DEFAULT_RUST_COMMAND)[0]).exists()
+
+
+def has_weights(kind: str) -> bool:
+    """True when at least one nn/weights/*_<kind>.pt file exists (kind: value|policy)."""
+    return bool(list(_WEIGHTS_DIR.glob(f"*_{kind}.pt")))
 
 _CHAR_TO_PROMO = {
     'n': PieceType.KNIGHT, 'b': PieceType.BISHOP,
@@ -51,14 +69,21 @@ def _uci_to_move(text: str):
 class UCIBackend:
     """Drives an external UCI engine as the bot brain."""
 
-    def __init__(self, command: str):
+    def __init__(self, command: str, evaluator: str | None = None):
         self.command = command
+        self.last_info: dict = {"nodes": 0, "nps": 0, "score": None,
+                                "depth": 0, "time_s": 0.0, "pv": [],
+                                "multipv": [], "effort": {}}
+        self._multipv = 1
         self._proc = subprocess.Popen(
             command, shell=True, text=True, bufsize=1,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
         )
         self._send("uci")
         self._wait_for("uciok")
+        # The compiled engines share the Python eval tiers; 'nn' is Python-only.
+        if evaluator in ("simple", "medium", "complex"):
+            self._send(f"setoption name Eval value {evaluator}")
         self._send("isready")
         self._wait_for("readyok")
 
@@ -74,17 +99,88 @@ class UCIBackend:
                 return
         raise RuntimeError(f"UCI engine {self.command!r} closed before '{token}'")
 
+    def set_multipv(self, k: int) -> None:
+        """Switch the engine's MultiPV (top-k lines + effort) live, between moves."""
+        k = max(1, k)
+        if k == self._multipv:
+            return
+        self._multipv = k
+        try:
+            self._send(f"setoption name MultiPV value {k}")
+        except Exception:
+            pass
+
     def get_best_move(self, board, depth: int = 3):
         """Return (from, to, promo|None) for the side to move, via UCI."""
         assert self._proc.stdout is not None
+        white = board.turn == Color.WHITE
         self._send(f"position fen {board.to_fen()}")
         self._send(f"go depth {depth}")
+        info = {"nodes": 0, "nps": 0, "score": None, "depth": 0, "time_s": 0.0,
+                "pv": [], "multipv": [], "effort": {}, "stm_white": white}
+        multipv_map: dict[int, dict] = {}
         for raw in self._proc.stdout:
             line = raw.strip()
-            if line.startswith("bestmove"):
+            if line.startswith("info string effort"):
+                info["effort"] = self._parse_effort(line)
+            elif line.startswith("info"):
+                fields, idx = self._parse_info_fields(line, white)
+                if idx is None or idx == 1:   # base telemetry mirrors the best line
+                    info.update(fields)
+                if idx is not None:
+                    pv = fields.get("pv", [])
+                    multipv_map[idx] = {"move": pv[0] if pv else None,
+                                        "score": fields.get("score"), "pv": pv}
+            elif line.startswith("bestmove"):
+                info["multipv"] = [multipv_map[i] for i in sorted(multipv_map)]
+                self.last_info = info
                 token = line.split()[1]
                 return None if token == "0000" else _uci_to_move(token)
         raise RuntimeError(f"UCI engine {self.command!r} closed before 'bestmove'")
+
+    @staticmethod
+    def _parse_info_fields(line: str, white: bool) -> tuple[dict, int | None]:
+        """Parse a UCI 'info' line; return (fields, multipv_index|None). Score is
+        converted to pawns from White's POV."""
+        toks = line.split()
+        fields: dict = {}
+        for key in ("depth", "nodes", "nps"):
+            if key in toks:
+                try:
+                    fields[key] = int(toks[toks.index(key) + 1])
+                except (ValueError, IndexError):
+                    pass
+        if "score" in toks:
+            i = toks.index("score")
+            kind, raw_val = toks[i + 1], int(toks[i + 2])
+            stm = (raw_val / 100.0) if kind == "cp" else (1000.0 if raw_val > 0 else -1000.0)
+            fields["score"] = stm if white else -stm
+        if "time" in toks:
+            try:
+                fields["time_s"] = int(toks[toks.index("time") + 1]) / 1000.0
+            except (ValueError, IndexError):
+                pass
+        if "pv" in toks:
+            fields["pv"] = [_uci_to_move(t) for t in toks[toks.index("pv") + 1:]]
+        idx = None
+        if "multipv" in toks:
+            try:
+                idx = int(toks[toks.index("multipv") + 1])
+            except (ValueError, IndexError):
+                pass
+        return fields, idx
+
+    @staticmethod
+    def _parse_effort(line: str) -> dict:
+        """'info string effort e2e4:123 d2d4:45 ...' -> {move_tuple: nodes}."""
+        effort: dict = {}
+        for tok in line.split()[3:]:
+            move_text, _, nodes = tok.partition(":")
+            try:
+                effort[_uci_to_move(move_text)] = int(nodes)
+            except (ValueError, IndexError, KeyError):
+                pass
+        return effort
 
     def close(self) -> None:
         try:
@@ -102,17 +198,30 @@ class PolicyBackend:
     def __init__(self, net, device: str = "cpu"):
         self._net = net
         self._device = device
+        # No tree search: the policy net picks one move
+        self.last_info: dict = {"nodes": 1, "nps": 0, "score": None,
+                                "depth": 0, "time_s": 0.0, "pv": [],
+                                "multipv": [], "effort": {}}
+
+    def set_multipv(self, k: int) -> None:
+        """No tree search, so MultiPV / density analysis is unavailable."""
 
     def get_best_move(self, board, depth: int = 3):
         """Return (from, to, promo|None); depth is unused (no tree search)."""
+        import time
+
         from nn.inference import policy_priors
 
+        start = time.time()
         priors = policy_priors(self._net, board, self._device)
         if not priors:
             return None
         (from_square, to_square), _ = max(priors.items(), key=lambda kv: kv[1])
         promotion = PieceType.QUEEN if board.needs_promotion(from_square, to_square) else None
-        return from_square, to_square, promotion
+        move = (from_square, to_square, promotion)
+        self.last_info = {"nodes": 1, "nps": 0, "score": None, "depth": 0,
+                          "time_s": time.time() - start, "pv": [move]}
+        return move
 
 
 # -- Weight loading ----------------------------------------------------------
@@ -162,9 +271,9 @@ def make_engine(lang: str = "py", search: str = "alphabeta", evaluator: str = "m
                 rust_command: str | None = None, tt_size_mb: int = 32):
     """Build the bot backend chosen by the command line args (see module docstring)."""
     if lang == "cpp":
-        return UCIBackend(cpp_command or DEFAULT_CPP_COMMAND)
+        return UCIBackend(cpp_command or DEFAULT_CPP_COMMAND, evaluator)
     if lang == "rust":
-        return UCIBackend(rust_command or DEFAULT_RUST_COMMAND)
+        return UCIBackend(rust_command or DEFAULT_RUST_COMMAND, evaluator)
 
     if search == "policy":
         from nn.network import PolicyNet

@@ -15,6 +15,14 @@ pub const MAX_PLY: usize = 64;
 pub const MAX_HISTORY: i32 = 16384;
 pub const QS_DEPTH: i32 = 8;
 
+/// One root move's full-window analysis (GUI MultiPV / density overlays).
+pub struct RootAnalysis {
+    pub mv: Move,
+    pub score: f64,      // White's-POV pawns
+    pub node_count: i64, // nodes spent in this move's subtree
+    pub pv: Vec<Move>,
+}
+
 // Centipawn values for MVV-LVA ordering (matches _CP in search.py).
 const CP: [i32; 6] = [100, 320, 330, 500, 900, 0];
 const PROMO_PIECES: [i32; 4] = [QUEEN as i32, ROOK as i32, BISHOP as i32, KNIGHT as i32];
@@ -80,6 +88,8 @@ pub struct Search {
     nodes: i64,
     deadline: Option<Instant>,
     stop: bool,
+    // Per-root-move (move, score, subtree_nodes) from the last completed depth.
+    root_info: Vec<(Move, f64, i64)>,
 }
 
 #[inline]
@@ -99,6 +109,7 @@ impl Search {
             nodes: 0,
             deadline: None,
             stop: false,
+            root_info: Vec::new(),
         };
         s.new_game();
         s
@@ -298,15 +309,25 @@ impl Search {
         let mut best_eval = 0.0;
         let mut best_move = NULL_MOVE;
 
+        // At the root, record each move's score and the (un-pruned) nodes spent in
+        // its subtree for feeding the GUI's MultiPV / density overlays.
+        let record_root = ply == 0;
+        let mut root_info: Vec<(Move, f64, i64)> = Vec::new();
+
         for (_, mv) in keyed {
             let is_quiet = mv.promotion == NO_PIECE && board.get_piece_at(mv.to).is_empty();
 
+            let nodes_before = self.nodes;
             board.make_move(mv.from, mv.to, mv.promotion);
             let (eval_score, _) = self.minimax(board, depth - 1, alpha, beta, ply + 1);
             board.unmake_move();
 
             if self.stop {
                 return (if have_best { best_eval } else { 0.0 }, best_move);
+            }
+
+            if record_root {
+                root_info.push((mv, eval_score, self.nodes - nodes_before));
             }
 
             if maximizing {
@@ -335,6 +356,10 @@ impl Search {
                 }
                 break;
             }
+        }
+
+        if record_root {
+            self.root_info = root_info;
         }
 
         let flag = if best_eval <= orig_alpha {
@@ -448,5 +473,32 @@ impl Search {
         }
 
         (best_move, best_score)
+    }
+
+    /// Run the normal (alpha-beta pruned) search, then report per root move,
+    /// ranked best-first for the side to move. Node count reflects how much of
+    /// each move's subtree survived pruning (the density signal).
+    pub fn analyze(&mut self, board: &mut CBoard, depth: i32) -> Vec<RootAnalysis> {
+        self.search_position(board, depth, None, None);
+
+        let maximizing = board.turn == WHITE;
+        let mut ranked = self.root_info.clone();
+        ranked.sort_by(|a, b| {
+            if maximizing {
+                b.1.partial_cmp(&a.1).unwrap()
+            } else {
+                a.1.partial_cmp(&b.1).unwrap()
+            }
+        });
+
+        let mut results: Vec<RootAnalysis> = Vec::new();
+        for (mv, score, node_count) in ranked {
+            board.make_move(mv.from, mv.to, mv.promotion);
+            let mut pv = self.extract_pv(board, depth); // response chain from TT
+            board.unmake_move();
+            pv.insert(0, mv);
+            results.push(RootAnalysis { mv, score, node_count, pv });
+        }
+        results
     }
 }

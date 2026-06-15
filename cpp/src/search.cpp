@@ -197,16 +197,24 @@ std::pair<double, Move> Search::minimax(CBoard &board, int depth, double alpha, 
     double best_eval = 0.0;
     Move best_move = NULL_MOVE;
 
+    // At the root, record each move's score and the (un-pruned) nodes spent in
+    // its subtree for feeding the GUI's MultiPV / density overlays.
+    bool record_root = ply == 0;
+    std::vector<std::tuple<Move, double, long>> root_info;
+
     for (auto &kv : keyed) {
         const Move &move = kv.second;
         bool is_quiet = move.promotion == NO_PIECE && board.get_piece_at(move.to).empty();
 
+        long nodes_before = nodes_;
         board.make_move(move.from, move.to, move.promotion);
         auto child = minimax(board, depth - 1, alpha, beta, ply + 1);
         double eval_score = child.first;
         board.unmake_move();
 
         if (stop_) return {have_best ? best_eval : 0.0, best_move};
+
+        if (record_root) root_info.emplace_back(move, eval_score, nodes_ - nodes_before);
 
         if (maximizing) {
             if (!have_best || eval_score > best_eval) {
@@ -235,6 +243,8 @@ std::pair<double, Move> Search::minimax(CBoard &board, int depth, double alpha, 
             break;
         }
     }
+
+    if (record_root) root_info_ = std::move(root_info);
 
     TTFlag flag = TTFlag::EXACT;
     if (best_eval <= orig_alpha) flag = TTFlag::UPPER;
@@ -327,4 +337,29 @@ std::pair<Move, double> Search::search_position(CBoard &board, int max_depth,
     }
 
     return {best_move, best_score};
+}
+
+std::vector<RootAnalysis> Search::analyze(CBoard &board, int depth) {
+    // Run the normal (alpha-beta pruned) search; report per root move. Node count
+    // reflects how much of each move's subtree survived pruning (density signal).
+    search_position(board, depth);
+
+    bool maximizing = board.turn == WHITE;
+    auto ranked = root_info_;
+    std::stable_sort(ranked.begin(), ranked.end(),
+                     [maximizing](const auto &a, const auto &b) {
+                         return maximizing ? std::get<1>(a) > std::get<1>(b)
+                                           : std::get<1>(a) < std::get<1>(b);
+                     });
+
+    std::vector<RootAnalysis> results;
+    for (const auto &r : ranked) {
+        Move move = std::get<0>(r);
+        board.make_move(move.from, move.to, move.promotion);
+        std::vector<Move> pv = extract_pv(board, depth);  // response chain from TT
+        board.unmake_move();
+        pv.insert(pv.begin(), move);
+        results.push_back({move, std::get<1>(r), std::get<2>(r), pv});
+    }
+    return results;
 }

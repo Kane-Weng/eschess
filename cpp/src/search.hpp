@@ -6,6 +6,7 @@
 #include <chrono>
 #include <functional>
 #include <memory>
+#include <tuple>
 #include <vector>
 
 #include "board.hpp"
@@ -15,6 +16,14 @@
 constexpr int MAX_PLY = 64;
 constexpr int MAX_HISTORY = 16384;
 constexpr int QS_DEPTH = 8;
+
+// One root move's full-window analysis (for the GUI's MultiPV / density overlays).
+struct RootAnalysis {
+    Move move;
+    double score;       // White's-POV pawns
+    long node_count;    // nodes spent in this move's subtree
+    std::vector<Move> pv;
+};
 
 class Search {
 public:
@@ -33,6 +42,8 @@ public:
     std::pair<Move, double> search_position(CBoard &board, int max_depth = MAX_PLY,
                                             double time_limit_ms = -1.0,
                                             InfoCallback info_callback = nullptr);
+
+    std::vector<RootAnalysis> analyze(CBoard &board, int depth);
 
 private:
     std::unique_ptr<BaseEvaluate> evaluate_;
@@ -55,4 +66,7 @@ private:
     Move first_legal_move(CBoard &board);
     std::vector<Move> extract_pv(CBoard &board, int max_len);
     bool time_up();
+
+    // Per-root-move (move, score, subtree_nodes) from the last completed depth.
+    std::vector<std::tuple<Move, double, long>> root_info_;
 };

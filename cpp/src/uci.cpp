@@ -11,7 +11,10 @@
 #include <unordered_map>
 #include <vector>
 
+#include <memory>
+
 #include "board.hpp"
+#include "evaluate.hpp"
 #include "search.hpp"
 
 namespace {
@@ -124,11 +127,22 @@ private:
     CBoard board_;
     Search search_;
     int hash_mb_;
+    std::string eval_level_ = "medium";
+    int multipv_ = 1;
+
+    // Build the evaluator named by eval_level_ (matches python/engine/evaluate.py).
+    std::unique_ptr<BaseEvaluate> make_eval() const {
+        if (eval_level_ == "simple") return std::make_unique<SimpleEvaluate>();
+        if (eval_level_ == "complex") return std::make_unique<ComplexEvaluate>();
+        return std::make_unique<MediumEvaluate>();
+    }
 
     void cmd_uci() {
         std::cout << "id name " << ENGINE_NAME << "\n";
         std::cout << "id author " << ENGINE_AUTHOR << "\n";
         std::cout << "option name Hash type spin default 32 min 1 max 1024\n";
+        std::cout << "option name Eval type combo default medium var simple var medium var complex\n";
+        std::cout << "option name MultiPV type spin default 1 min 1 max 5\n";
         std::cout << "uciok" << std::endl;
     }
 
@@ -141,9 +155,15 @@ private:
             std::string name = tokens[1];
             std::string value = tokens.back();
             std::transform(name.begin(), name.end(), name.begin(), ::tolower);
+            std::transform(value.begin(), value.end(), value.begin(), ::tolower);
             if (name == "hash") {
                 hash_mb_ = std::max(1, std::stoi(value));
-                search_ = Search(nullptr, hash_mb_);
+                search_ = Search(make_eval(), hash_mb_);
+            } else if (name == "eval") {
+                eval_level_ = value;
+                search_ = Search(make_eval(), hash_mb_);
+            } else if (name == "multipv") {
+                multipv_ = std::max(1, std::stoi(value));
             }
         }
     }
@@ -239,6 +259,11 @@ private:
 
         bool white = board_.turn == WHITE;
 
+        if (multipv_ > 1) {
+            go_multipv(max_depth < MAX_PLY ? max_depth : 4, white);
+            return;
+        }
+
         auto emit_info = [white](int depth, double score, long nodes, double elapsed,
                                  const std::vector<Move> &pv) {
             long nps = elapsed > 0 ? static_cast<long>(nodes / elapsed) : 0;
@@ -257,6 +282,34 @@ private:
         Move best_move = result.first;
         std::cout << "bestmove " << (best_move != NULL_MOVE ? move_to_uci(best_move) : "0000")
                   << std::endl;
+    }
+
+    void go_multipv(int depth, bool white) {
+        auto results = search_.analyze(board_, depth);
+        if (results.empty()) {
+            std::cout << "bestmove 0000" << std::endl;
+            return;
+        }
+        long total_nodes = 0;
+        for (const auto &r : results) total_nodes += r.node_count;
+
+        int k = std::min<int>(multipv_, static_cast<int>(results.size()));
+        for (int i = 0; i < k; ++i) {
+            const auto &r = results[i];
+            std::string pv_text;
+            for (size_t j = 0; j < r.pv.size(); ++j) {
+                if (j) pv_text += " ";
+                pv_text += move_to_uci(r.pv[j]);
+            }
+            std::cout << "info multipv " << (i + 1) << " depth " << depth << " score "
+                      << score_to_uci(r.score, white, static_cast<int>(r.pv.size()))
+                      << " nodes " << total_nodes << " pv " << pv_text << std::endl;
+        }
+        std::string effort = "info string effort";
+        for (const auto &r : results)
+            effort += " " + move_to_uci(r.move) + ":" + std::to_string(r.node_count);
+        std::cout << effort << std::endl;
+        std::cout << "bestmove " << move_to_uci(results[0].move) << std::endl;
     }
 };
 

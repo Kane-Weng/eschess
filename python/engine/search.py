@@ -65,6 +65,14 @@ class Search:
         self._nodes:    int          = 0
         self._deadline: float | None = None
         self._stop:     bool         = False
+        # Telemetry of the most recent get_best_move (consumed by the GUI panel).
+        self.last_info: dict = {"nodes": 0, "nps": 0, "score": None,
+                                "depth": 0, "time_s": 0.0, "pv": [],
+                                "multipv": [], "effort": {}}
+        # >1 makes get_best_move run a full root analysis (GUI MultiPV / density).
+        self.multipv: int = 1
+        # Per-root-move (move, score, subtree_nodes) from the last completed depth.
+        self._root_info: list[tuple] = []
 
     def new_game(self) -> None:
         """Reset search state between games (TT persists for transposition reuse)."""
@@ -216,16 +224,25 @@ class Search:
         best_eval: float | None = None
         best_move: Move | None  = None
 
+        # At the root, record each move's score and the (un-pruned) nodes spent in
+        # its subtree for this feeding the GUI's MultiPV / density overlays.
+        record_root = ply == 0
+        root_info: list[tuple] = []
+
         for move in legal_moves:
             from_square, to_square, promotion = move
             is_quiet = promotion is None and board.get_piece_at(to_square) is None
 
+            nodes_before = self._nodes
             board.make_move(from_square, to_square, promotion)
             eval_score, _ = self.minimax(board, depth - 1, alpha, beta, ply + 1)
             board.unmake_move()
 
             if self._stop:
                 return (best_eval if best_eval is not None else 0.0), best_move
+
+            if record_root:
+                root_info.append((move, eval_score, self._nodes - nodes_before))
 
             if maximizing:
                 if best_eval is None or eval_score > best_eval:
@@ -244,6 +261,9 @@ class Search:
                     self._update_history(board.turn.value, from_square, to_square, depth)
                 break
 
+        if record_root:
+            self._root_info = root_info
+
         # Store result in TT
         flag = TTFlag.EXACT
         if   best_eval <= orig_alpha: flag = TTFlag.UPPER
@@ -254,10 +274,66 @@ class Search:
 
     # ── Public API ───────────────────────────────────────────────────────────
 
+    def set_multipv(self, k: int) -> None:
+        """k>1 switches get_best_move to a full root analysis (for the GUI)."""
+        self.multipv = max(1, k)
+
     def get_best_move(self, board: CBoard, depth: int = 3) -> Move | None:
         """Iterative deepening search; returns (from, to, promo) for the current player."""
-        move, _ = self.search_position(board, max_depth=depth)
+        if self.multipv > 1:
+            return self._best_move_multipv(board, depth)
+
+        def _record(d: int, score: float, nodes: int, elapsed: float, pv: list) -> None:
+            self.last_info = {
+                "nodes": nodes, "nps": int(nodes / elapsed) if elapsed > 0 else 0,
+                "score": score, "depth": d, "time_s": elapsed, "pv": list(pv),
+                "multipv": [], "effort": {},
+            }
+
+        move, _ = self.search_position(board, max_depth=depth, info_callback=_record)
         return move
+
+    def _best_move_multipv(self, board: CBoard, depth: int) -> Move | None:
+        """Pick the best move from a full root analysis, recording the top lines
+        and per-move node effort for the GUI's MultiPV / density overlays."""
+        start = time.time()
+        results = self.analyze(board, depth)
+        if not results:
+            self.last_info = {"nodes": 0, "nps": 0, "score": None, "depth": depth,
+                              "time_s": time.time() - start, "pv": [],
+                              "multipv": [], "effort": {}}
+            return None
+        elapsed = time.time() - start
+        total_nodes = sum(r["nodes"] for r in results)
+        best = results[0]
+        self.last_info = {
+            "nodes": total_nodes,
+            "nps": int(total_nodes / elapsed) if elapsed > 0 else 0,
+            "score": best["score"], "depth": depth, "time_s": elapsed,
+            "pv": best["pv"],
+            "multipv": [{"move": r["move"], "score": r["score"], "pv": r["pv"]}
+                        for r in results[:self.multipv]],
+            "effort": {r["move"]: r["nodes"] for r in results},
+            "stm_white": board.turn == Color.WHITE,
+        }
+        return best["move"]
+
+    def analyze(self, board: CBoard, depth: int) -> list[dict]:
+        """Run the normal (alpha-beta pruned) search, then report per root move
+        {move, score, nodes, pv}, ranked best-first for the side to move. Scores
+        and node counts come from that one pruned search. Node count reflects how
+        much of each move's subtree survived pruning (the density signal)."""
+        self.search_position(board, max_depth=depth)
+        maximizing = board.turn == Color.WHITE
+        ranked = sorted(self._root_info, key=lambda r: r[1], reverse=maximizing)
+        results: list[dict] = []
+        for move, score, nodes in ranked:
+            from_square, to_square, promotion = move
+            board.make_move(from_square, to_square, promotion)
+            pv = [move] + self._extract_pv(board, depth)   # response chain from TT
+            board.unmake_move()
+            results.append({"move": move, "score": score, "nodes": nodes, "pv": pv})
+        return results
 
     def _first_legal_move(self, board: CBoard) -> Move | None:
         """A guaranteed-legal move, used as a fallback when time runs out at depth 1."""
