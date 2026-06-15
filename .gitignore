@@ -7,3 +7,6 @@
 
 # Internal roadmap notes
 /TASKS.md
+
+# Local secrets (Hugging Face token, etc.)
+.env

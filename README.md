@@ -26,6 +26,14 @@ and languages.
 - Pawn structure (doubled / isolated / passed), bishop pair, rough mobility,
   and a midgame/endgame king-safety table
 
+**Neural networks** (supervised; optional `nn` extra)
+- Separate policy and value networks, each with a CNN or light-ResNet trunk
+  (one `num_res_blocks` knob switches between them)
+- Board-to-planes encoding and a 4096 from-to policy head
+- Hybrid hooks: the value net drops into the alpha-beta search as a
+  `BaseEvaluate`, and the policy net supplies move priors
+- Dataset and training-loop templates for supervised learning (no RL yet)
+
 **Interfaces**
 - UCI protocol over stdin/stdout — drives from any GUI or match runner
 - A pygame GUI to play against the bot, with legal-move hints and a promotion picker
@@ -47,8 +55,24 @@ partner) · Ordo (rating) · cutechess-cli (match runner) · Docker
 ```bash
 uv sync                 # create the environment from the lockfile
 
-uv run python main.py   # play against the bot (pygame GUI)
-uv run python uci.py    # talk UCI:  uci → isready → position startpos → go movetime 1000
+uv run python python/main.py   # play against the bot (pygame GUI)
+uv run python python/uci.py    # talk UCI:  uci, isready, position startpos, go movetime 1000
+```
+
+The Python implementation lives under `python/` (engine core in `python/engine`,
+neural nets in `python/nn`), leaving room for other-language implementations
+beside it. Shared tooling (`assets/`, `harness/`) stays at the repo root.
+
+To train the supervised networks, install the optional dependencies first. Games
+are streamed from the [angeluriot/chess_games](https://huggingface.co/datasets/angeluriot/chess_games)
+dataset and replayed into (position, move, result) samples:
+
+```bash
+uv sync --extra nn             # adds torch + numpy + datasets
+
+cd python
+python -m nn.train --mode policy --max-games 2000 --epochs 5
+python -m nn.train --mode value  --max-games 2000 --min-elo 2200 --epochs 5
 ```
 
 ## Docker
@@ -61,7 +85,7 @@ reproducible with no host setup.
 docker build -t eschess .
 
 # Run the engine as a UCI process
-docker run --rm -i eschess python uci.py
+docker run --rm -i eschess python python/uci.py
 
 # Benchmark vs a strength-limited Stockfish:  GAMES  MOVETIME_MS  STOCKFISH_ELO
 docker run --rm eschess harness/benchmark.sh 100 100 1320
@@ -87,8 +111,8 @@ material), and writes a PGN:
 
 ```bash
 uv run python harness/match.py \
-    --engine1 "python3 uci.py" --name1 EschessA \
-    --engine2 "python3 uci.py" --name2 EschessB \
+    --engine1 "python3 python/uci.py" --name1 EschessA \
+    --engine2 "python3 python/uci.py" --name2 EschessB \
     --games 100 --movetime 100 --openings harness/openings.epd --pgn results.pgn
 ```
 
@@ -96,8 +120,8 @@ Point `--engine2` at Stockfish (capped to 1320 Elo) for a real benchmark:
 
 ```bash
 uv run python harness/match.py \
-    --engine1 "python3 uci.py" --name1 Eschess \
-    --engine2 "stockfish"      --name2 SF-1320 \
+    --engine1 "python3 python/uci.py" --name1 Eschess \
+    --engine2 "stockfish"             --name2 SF-1320 \
     --opt2 UCI_LimitStrength=true --opt2 UCI_Elo=1320 \
     --games 100 --movetime 100 --openings harness/openings.epd --pgn results.pgn
 ```
