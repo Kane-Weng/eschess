@@ -2,6 +2,10 @@
 /.venv
 /.vscode
 
+# C++ build artifacts
+/cpp/build/
+build/
+
 # Match artifacts
 *.pgn
 
@@ -10,3 +14,6 @@
 
 # Local secrets (Hugging Face token, etc.)
 .env
+
+# Model weights
+*weights/

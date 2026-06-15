@@ -5,13 +5,14 @@ Author: Kane Weng
 Main execution file for a chess game using pygame.
 """
 
+import argparse
 import pygame
 import sys
 import threading
 import copy
 from pathlib import Path
 from engine.board import CBoard, Color, PieceType
-from engine.search import Search
+from engine_backend import make_engine
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
 
@@ -189,7 +190,7 @@ def draw_status(screen: pygame.Surface, board: CBoard, bot_thinking: bool):
     screen.blit(text, (10, SQUARE_SIZE * 8 + 8))
 
 
-def main():
+def main(args):
     pygame.init()
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
     pygame.display.set_caption("ESCHESS")
@@ -197,7 +198,13 @@ def main():
 
     board = CBoard()
     load_assets()
-    search = Search()
+    # Bot brain chosen by the command line args (Python or C++, alpha-beta or
+    # policy net, and the evaluation level). See engine_backend.py.
+    search = make_engine(
+        lang=args.lang, search=args.search, evaluator=args.eval,
+        device=args.device, cpp_command=args.cpp_command,
+    )
+    bot_depth = args.depth
 
     selected_sq: int | None = None
     legal_mask: int = 0
@@ -222,7 +229,7 @@ def main():
         board_copy = copy.deepcopy(board)
 
         def _run():
-            bot["move"] = search.get_best_move(board_copy, BOT_DEPTH)
+            bot["move"] = search.get_best_move(board_copy, bot_depth)
             bot["thinking"] = False
 
         # Daemon thread: auto terminates as all non-daemon threads finish
@@ -317,5 +324,20 @@ def main():
     sys.exit()
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Play chess against the eschess bot.")
+    parser.add_argument("--lang", choices=("py", "cpp"), default="py",
+                        help="bot implementation: in-process Python or external C++ UCI binary")
+    parser.add_argument("--search", choices=("alphabeta", "policy"), default="alphabeta",
+                        help="Python move source: alpha-beta tree search or the policy network")
+    parser.add_argument("--eval", choices=("simple", "medium", "complex", "nn"), default="medium",
+                        help="evaluation for alpha-beta search; 'nn' is the value network "
+                             "(ignored when --search policy or --lang cpp)")
+    parser.add_argument("--depth", type=int, default=BOT_DEPTH, help="bot search depth")
+    parser.add_argument("--device", default="cpu", help="torch device for the networks")
+    parser.add_argument("--cpp-command", default=None, help="override the C++ UCI binary path")
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
-    main()
+    main(parse_args())
