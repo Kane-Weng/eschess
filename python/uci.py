@@ -15,13 +15,20 @@ Supported commands:
      [movestogo N] [infinite]
   stop / quit
 
+The bot brain is selectable, mirroring main.py (see engine_backend.make_engine):
+
+  python uci.py                    alpha-beta with the medium evaluation (default)
+  python uci.py --eval nn          alpha-beta with the value network as evaluation
+  python uci.py --search policy     moves straight from the policy network
+
 Run:  python3 uci.py     (or: uv run python uci.py)
 """
 
+import argparse
 import sys
 
 from engine.board import CBoard, Color, PieceType, STARTPOS_FEN, square_name, name_to_square
-from engine.search import Search
+from engine_backend import make_engine
 
 ENGINE_NAME   = "Eschess"
 ENGINE_AUTHOR = "Kane Weng"
@@ -77,10 +84,23 @@ def _score_to_uci(score: float, white_to_move: bool, pv_len: int = 0) -> str:
 
 
 class UCIEngine:
-    def __init__(self) -> None:
-        self.board  = CBoard()
-        self.search = Search()
+    def __init__(self, search: str = "alphabeta", evaluator: str = "medium",
+                 device: str = "cpu") -> None:
+        self.board   = CBoard()
+        self._search  = search
+        self._eval    = evaluator
+        self._device  = device
         self._hash_mb = 32
+        self._build_engine()
+
+    def _build_engine(self) -> None:
+        """(Re)build the brain from the stored config; alpha-beta brains expose
+        search_position, the policy brain only get_best_move."""
+        self.engine = make_engine(
+            lang="py", search=self._search, evaluator=self._eval,
+            device=self._device, tt_size_mb=self._hash_mb,
+        )
+        self._is_search = hasattr(self.engine, "search_position")
 
     # ── Command dispatch ─────────────────────────────────────────────────────
 
@@ -96,7 +116,8 @@ class UCIEngine:
             elif cmd == "isready":
                 print("readyok", flush=True)
             elif cmd == "ucinewgame":
-                self.search.new_game()
+                if self._is_search:
+                    self.engine.new_game()
                 self.board = CBoard()
             elif cmd == "setoption":
                 self._cmd_setoption(rest)
@@ -122,9 +143,9 @@ class UCIEngine:
         tokens = rest.split()
         if len(tokens) >= 4 and tokens[0] == "name" and tokens[-2] == "value":
             name, value = tokens[1], tokens[-1]
-            if name.lower() == "hash":
+            if name.lower() == "hash" and self._is_search:
                 self._hash_mb = max(1, int(value))
-                self.search = Search(tt_size_mb=self._hash_mb)
+                self._build_engine()
 
     def _cmd_position(self, rest: str) -> None:
         tokens = rest.split()
@@ -146,6 +167,10 @@ class UCIEngine:
                 self.board.make_move(from_square, to_square, promotion)
 
     def _cmd_go(self, rest: str) -> None:
+        if not self._is_search:
+            self._go_policy()
+            return
+
         params = self._parse_go(rest)
         max_depth, time_limit_ms = self._plan_time(params)
 
@@ -160,10 +185,17 @@ class UCIEngine:
                 flush=True,
             )
 
-        best_move, _ = self.search.search_position(
+        best_move, _ = self.engine.search_position(
             self.board, max_depth=max_depth, time_limit_ms=time_limit_ms,
             info_callback=emit_info,
         )
+        print(f"bestmove {move_to_uci(best_move) if best_move else '0000'}", flush=True)
+
+    def _go_policy(self) -> None:
+        """The policy net picks a move directly; there is no tree to search."""
+        best_move = self.engine.get_best_move(self.board)
+        if best_move is not None:
+            print(f"info depth 1 score cp 0 nodes 1 pv {move_to_uci(best_move)}", flush=True)
         print(f"bestmove {move_to_uci(best_move) if best_move else '0000'}", flush=True)
 
     # ── "go" argument parsing & time allocation ──────────────────────────────
@@ -213,5 +245,17 @@ class UCIEngine:
         return max_depth, _apply_margin(1_000.0)   # bare "go" → ~1s
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Eschess UCI engine.")
+    parser.add_argument("--search", choices=("alphabeta", "policy"), default="alphabeta",
+                        help="move source: alpha-beta tree search or the policy network")
+    parser.add_argument("--eval", choices=("simple", "medium", "complex", "nn"), default="medium",
+                        help="evaluation for alpha-beta search; 'nn' is the value network "
+                             "(ignored when --search policy)")
+    parser.add_argument("--device", default="cpu", help="torch device for the networks")
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
-    UCIEngine().run()
+    args = parse_args()
+    UCIEngine(search=args.search, evaluator=args.eval, device=args.device).run()

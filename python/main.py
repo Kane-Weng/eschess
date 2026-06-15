@@ -203,6 +203,7 @@ def main(args):
     search = make_engine(
         lang=args.lang, search=args.search, evaluator=args.eval,
         device=args.device, cpp_command=args.cpp_command,
+        rust_command=args.rust_command,
     )
     bot_depth = args.depth
 
@@ -326,8 +327,8 @@ def main(args):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Play chess against the eschess bot.")
-    parser.add_argument("--lang", choices=("py", "cpp"), default="py",
-                        help="bot implementation: in-process Python or external C++ UCI binary")
+    parser.add_argument("--lang", choices=("py", "cpp", "rust"), default="py",
+                        help="bot implementation: in-process Python, or external C++/Rust UCI binary")
     parser.add_argument("--search", choices=("alphabeta", "policy"), default="alphabeta",
                         help="Python move source: alpha-beta tree search or the policy network")
     parser.add_argument("--eval", choices=("simple", "medium", "complex", "nn"), default="medium",
@@ -336,6 +337,7 @@ def parse_args():
     parser.add_argument("--depth", type=int, default=BOT_DEPTH, help="bot search depth")
     parser.add_argument("--device", default="cpu", help="torch device for the networks")
     parser.add_argument("--cpp-command", default=None, help="override the C++ UCI binary path")
+    parser.add_argument("--rust-command", default=None, help="override the Rust UCI binary path")
     return parser.parse_args()
 
 

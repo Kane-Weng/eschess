@@ -1,11 +1,12 @@
 """
 Engine backend selection for the pygame GUI.
 
-The GUI keeps the Python `CBoard` for rendering and legality, but the bot's
+The GUI keeps the Python 'CBoard' for rendering and legality, but the bot's
 "brain" is pluggable. main.py picks it through command line args:
 
     --lang py    in-process Python engine (default)
     --lang cpp   drive the external C++ UCI binary over stdin/stdout
+    --lang rust  drive the external Rust UCI binary over stdin/stdout
 
 For the Python engine, the move source and evaluation are also selectable:
 
@@ -16,9 +17,7 @@ For the Python engine, the move source and evaluation are also selectable:
 
 The 'nn' evaluation wraps the trained value network; 'policy' search uses the
 trained policy network. Both load the most recent weights from nn/weights unless
-an explicit path is given. Every backend exposes the same
-`get_best_move(board, depth)` signature as `engine.search.Search`, so they are
-drop-in interchangeable in main.py.
+an explicit path is given.
 """
 
 import subprocess
@@ -31,6 +30,7 @@ _REPO_ROOT   = _PYTHON_DIR.parent
 _WEIGHTS_DIR = _PYTHON_DIR / "nn" / "weights"
 
 DEFAULT_CPP_COMMAND = str(_REPO_ROOT / "cpp" / "build" / "uci")
+DEFAULT_RUST_COMMAND = str(_REPO_ROOT / "rust" / "target" / "release" / "uci")
 
 _CHAR_TO_PROMO = {
     'n': PieceType.KNIGHT, 'b': PieceType.BISHOP,
@@ -158,10 +158,13 @@ def _build_evaluator(name: str, device: str, weights: str | None):
 
 def make_engine(lang: str = "py", search: str = "alphabeta", evaluator: str = "medium",
                 device: str = "cpu", value_weights: str | None = None,
-                policy_weights: str | None = None, cpp_command: str | None = None):
+                policy_weights: str | None = None, cpp_command: str | None = None,
+                rust_command: str | None = None, tt_size_mb: int = 32):
     """Build the bot backend chosen by the command line args (see module docstring)."""
     if lang == "cpp":
         return UCIBackend(cpp_command or DEFAULT_CPP_COMMAND)
+    if lang == "rust":
+        return UCIBackend(rust_command or DEFAULT_RUST_COMMAND)
 
     if search == "policy":
         from nn.network import PolicyNet
@@ -170,4 +173,5 @@ def make_engine(lang: str = "py", search: str = "alphabeta", evaluator: str = "m
         return PolicyBackend(net, device)
 
     from engine.search import Search
-    return Search(evaluator=_build_evaluator(evaluator, device, value_weights))
+    return Search(evaluator=_build_evaluator(evaluator, device, value_weights),
+                  tt_size_mb=tt_size_mb)

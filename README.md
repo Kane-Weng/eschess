@@ -60,8 +60,39 @@ uv run python python/uci.py    # talk UCI:  uci, isready, position startpos, go 
 ```
 
 The Python implementation lives under `python/` (engine core in `python/engine`,
-neural nets in `python/nn`), leaving room for other-language implementations
-beside it. Shared tooling (`assets/`, `harness/`) stays at the repo root.
+neural nets in `python/nn`), with equivalent-logic ports beside it in `cpp/`
+(C++17) and `rust/` (Rust). Each port is a standalone UCI binary that the match
+harness and the GUI drive identically. Shared tooling (`assets/`, `harness/`)
+stays at the repo root.
+
+### Cross-language engines (C++ / Rust)
+
+The C++ and Rust engines are line-for-line ports of the Python core: the same
+bitboard move generation, handcrafted evaluation, and alpha-beta search with a
+transposition table. They are verified equivalent — identical perft counts and
+byte-identical search output (scores, node counts, principal variation) at a
+fixed depth — and run orders of magnitude faster.
+
+```bash
+# C++  → cpp/build/uci
+cmake -S cpp -B cpp/build -DCMAKE_BUILD_TYPE=Release && cmake --build cpp/build -j
+
+# Rust → rust/target/release/uci
+cargo build --release --manifest-path rust/Cargo.toml
+
+# Validate move generation (should match the reference perft numbers)
+cpp/build/perft
+cargo run --release --manifest-path rust/Cargo.toml --bin perft
+```
+
+Play the GUI against any of the three brains (the board still renders in Python;
+only the bot's move is computed by the chosen engine):
+
+```bash
+uv run python python/main.py --lang py                 # in-process Python (default)
+uv run python python/main.py --lang cpp                # C++ UCI binary
+uv run python python/main.py --lang rust               # Rust UCI binary
+```
 
 To train the supervised networks, install the optional dependencies first. Games
 are streamed from the [angeluriot/chess_games](https://huggingface.co/datasets/angeluriot/chess_games)
@@ -78,8 +109,10 @@ python -m nn.train --mode value  --max-games 2000 --min-elo 2200 --epochs 5
 ## Docker
 
 The image bundles the engine with every external tool the benchmark needs —
-**Stockfish**, **Ordo**, and **cutechess-cli** — so the whole pipeline is
-reproducible with no host setup.
+**Stockfish**, **Ordo**, and **cutechess-cli** — and builds the **C++ and Rust**
+engines (`cpp/build/uci`, `rust/target/release/uci`), so the entire
+cross-language pipeline (matches, telemetry, ACL vs Stockfish) is reproducible
+with no host setup.
 
 ```bash
 docker build -t eschess .
@@ -87,8 +120,16 @@ docker build -t eschess .
 # Run the engine as a UCI process
 docker run --rm -i eschess python python/uci.py
 
-# Benchmark vs a strength-limited Stockfish:  GAMES  MOVETIME_MS  STOCKFISH_ELO
-docker run --rm eschess harness/benchmark.sh 100 100 1320
+# Benchmark vs a strength-limited Stockfish
+docker run --rm eschess python harness/benchmark.py --a-eval medium --stockfish 1320 --games 100
+
+# Cross-language throughput, and move quality vs Stockfish
+docker run --rm eschess python harness/telemetry.py --depth 7
+docker run --rm eschess bash -c '\
+    python harness/match.py --engine1 cpp/build/uci --name1 eschess-cpp \
+        --engine2 stockfish --name2 SF-1350 --opt2 UCI_LimitStrength=true \
+        --opt2 UCI_Elo=1350 --games 4 --movetime 100 --pgn /tmp/g.pgn && \
+    python harness/acl.py /tmp/g.pgn --ref stockfish --ref-depth 12'
 ```
 
 The benchmark writes its PGN to `results.pgn` *inside* the container, so with
@@ -97,7 +138,7 @@ copy it out:
 
 ```bash
 docker run --rm -v "$PWD:/out" eschess \
-    bash -c "harness/benchmark.sh 100 100 1320 && cp results.pgn /out/"
+    bash -c "python harness/benchmark.py --a-eval medium --stockfish 1320 --games 100 && cp results.pgn /out/"
 ```
 
 (Running the harness locally instead writes `results.pgn` straight into your
@@ -113,8 +154,14 @@ material), and writes a PGN:
 uv run python harness/match.py \
     --engine1 "python3 python/uci.py" --name1 EschessA \
     --engine2 "python3 python/uci.py" --name2 EschessB \
-    --games 100 --movetime 100 --openings harness/openings.epd --pgn results.pgn
+    --games 100 --movetime 100 --concurrency 4 \
+    --openings harness/openings.epd --pgn results.pgn
 ```
+
+`--concurrency N` plays N games in parallel (each worker owns its own engine
+pair). The engine config is chosen on the command line, so any matchup works,
+e.g. `--engine1 "python3 python/uci.py --eval nn"` (value network) or
+`--engine2 "python3 python/uci.py --search policy"` (policy network).
 
 Point `--engine2` at Stockfish (capped to 1320 Elo) for a real benchmark:
 
@@ -134,9 +181,42 @@ for three or more it solves a Bradley-Terry model for a full rating table:
 uv run python harness/elo.py results.pgn --anchor SF-1320 --anchor-elo 1320
 ```
 
+**Benchmark the ML model (one shot).** `harness/benchmark.py` wraps the
+match-then-rate flow and builds the engine commands for you. ML configs (`nn`
+evaluation, `policy` search) need the torch deps, so run under the `nn` extra:
+
+```bash
+# value network vs the medium handcrafted eval
+uv run --extra nn python harness/benchmark.py --a-eval nn --b-eval medium \
+    --games 100 --movetime 100 --concurrency 4
+
+# policy network vs a 1320 Stockfish
+uv run --extra nn python harness/benchmark.py --a-search policy --stockfish 1320 \
+    --games 100 --concurrency 4
+```
+
 **Standard tooling.** `harness/run_cutechess.sh` drives the same benchmark
-through `cutechess-cli` and rates it with Ordo, and `harness/benchmark.sh`
-wraps the one-shot match-then-rate flow used inside Docker.
+through `cutechess-cli` and rates it with Ordo.
+
+**Cross-language telemetry.** `harness/telemetry.py` drives the Python, C++, and
+Rust engines over UCI on a shared set of positions and reports nodes-per-second,
+peak memory, and (where `perf` hardware counters are permitted) cache-miss rate.
+Because the three engines are logically equivalent they visit the same nodes at a
+fixed depth, so NPS is a clean speed comparison. Results go to a timestamped CSV
+under `harness/results/`; with the `bench` extra it also renders PNG charts:
+
+```bash
+uv run --extra bench python harness/telemetry.py --depth 6 --cache --plot
+```
+
+**Move quality (Average Centipawn Loss).** `harness/acl.py` scores the moves in a
+played PGN against a strong reference engine (Stockfish), reporting ACL split by
+game phase (opening / middlegame / endgame) and by player — how much worse each
+played move was than the reference's best:
+
+```bash
+uv run python harness/acl.py harness/results/<run>/games.pgn --ref stockfish --ref-depth 14
+```
 
 **Notes**
 - The engine is pure Python (~2–16k NPS), so use short fixed-time controls
@@ -159,9 +239,11 @@ wraps the one-shot match-then-rate flow used inside Docker.
   master games, an AlphaZero-style self-play RL loop with MCTS, and a hybrid
   orchestrator (opening book early, search/ML in the middlegame, endgame
   tablebases when the board simplifies).
-- **Phase 3 — Cross-language benchmarking:** the same alpha-beta search and
-  evaluation in Python, C++, and Rust, with telemetry for nodes-per-second,
-  memory, and move quality (average centipawn loss vs Stockfish).
+- **Phase 3 — Cross-language benchmarking (done):** the same alpha-beta search
+  and evaluation in Python, C++ (`cpp/`), and Rust (`rust/`), verified equivalent
+  by perft and byte-identical fixed-depth search; telemetry for nodes-per-second,
+  memory, and cache misses (`harness/telemetry.py`); and move quality via average
+  centipawn loss vs Stockfish (`harness/acl.py`).
 - **Phase 4 — Web deployment & visualization:** an interactive sandbox with a
   *learning* mode (watch engine-vs-engine games with the search tree and
   evaluations overlaid) and a *competition* mode (play a configurable engine),
