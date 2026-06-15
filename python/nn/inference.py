@@ -46,6 +46,12 @@ class NNEvaluate(BaseEvaluate):
         return value * self._scale   # White's perspective, pawn units
 
 
+def value_estimate(net: ValueNet, board: CBoard, device: str = "cpu") -> float:
+    """Raw tanh value in [-1, 1] from White's perspective."""
+    with torch.no_grad():
+        return float(net(_planes_tensor(board, device)).item())
+
+
 def policy_priors(net: PolicyNet, board: CBoard, device: str = "cpu") -> dict[tuple[int, int], float]:
     """Return {(from_square, to_square): probability} over the legal moves."""
     with torch.no_grad():
