@@ -25,3 +25,7 @@ ffi = [
 
 [tool.uv.sources]
 eschess-native = { path = "rust-ffi" }
+
+# Test runner for the cross-language parity suite (tests/). Synced by default.
+[dependency-groups]
+dev = ["pytest>=8"]

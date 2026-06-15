@@ -78,10 +78,16 @@ def test_encoding_parity():
         assert np.array_equal(native, python), fen
 
 
+# Every promotion piece, sharing one integer code across CBoard's PieceType
+# and the native API (KNIGHT=1, BISHOP=2, ROOK=3, QUEEN=4).
+_PROMO_TYPES = (PieceType.KNIGHT, PieceType.BISHOP, PieceType.ROOK, PieceType.QUEEN)
+
+
 def test_movegen_fen_parity():
     _require()
     rng = random.Random(0)
     plies = 0
+    promotions = 0
     for _ in range(60):
         nb, cb = en.PyBoard(), CBoard()
         for _ in range(60):
@@ -92,9 +98,25 @@ def test_movegen_fen_parity():
                 break
             f, t = rng.choice(keys)
             plies += 1
-            cb.make_move(f, t, PieceType.QUEEN if cb.needs_promotion(f, t) else None)
-            nb.make_move(f, t, 4 if nb.needs_promotion(f, t) else -1)
-    assert plies > 1000   # exercised a meaningful number of positions
+            if nb.needs_promotion(f, t):
+                assert cb.needs_promotion(f, t), cb.to_fen()
+                # Exhaustively cover every underpromotion (and the queen)
+                for promo in _PROMO_TYPES:
+                    cb.make_move(f, t, promo)
+                    nb.make_move(f, t, int(promo))
+                    assert nb.to_fen() == cb.to_fen(), (cb.to_fen(), promo)
+                    cb.unmake_move()
+                    nb.unmake_move()
+                    promotions += 1
+                # Advance the game with one randomly chosen promotion piece.
+                promo = rng.choice(_PROMO_TYPES)
+                cb.make_move(f, t, promo)
+                nb.make_move(f, t, int(promo))
+            else:
+                cb.make_move(f, t, None)
+                nb.make_move(f, t, -1)
+    assert plies > 1000     # exercised a meaningful number of positions
+    assert promotions > 0   # all four promotion pieces were covered at least once
 
 
 def test_zobrist_internal_consistency():
