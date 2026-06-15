@@ -16,8 +16,9 @@ For the Python engine, the move source and evaluation are also selectable:
     --eval simple | medium | complex | nn   (used only by alpha-beta search)
 
 The 'nn' evaluation wraps the trained value network; 'policy' search uses the
-trained policy network. Both load the most recent weights from nn/weights unless
-an explicit path is given.
+trained policy network. Both load weights from 'supervised' (nn/weights) or 
+'rl' (nn/weights/rl, the self-play checkpoints). The GUI exposes this source 
+toggle, so RL nets can be played directly without copying them up into nn/weights first.
 """
 
 import shlex
@@ -29,6 +30,7 @@ from engine.board import Color, PieceType, name_to_square
 _PYTHON_DIR  = Path(__file__).resolve().parent
 _REPO_ROOT   = _PYTHON_DIR.parent
 _WEIGHTS_DIR = _PYTHON_DIR / "nn" / "weights"
+_RL_DIR      = _WEIGHTS_DIR / "rl"
 
 DEFAULT_CPP_COMMAND = str(_REPO_ROOT / "cpp" / "build" / "uci")
 DEFAULT_RUST_COMMAND = str(_REPO_ROOT / "rust" / "target" / "release" / "uci")
@@ -47,8 +49,13 @@ def rust_available(command: str | None = None) -> bool:
 
 
 def has_weights(kind: str) -> bool:
-    """True when at least one nn/weights/*_<kind>.pt file exists (kind: value|policy)."""
-    return bool(list(_WEIGHTS_DIR.glob(f"*_{kind}.pt")))
+    """True when at least one supervised nn/weights/*_<kind>.pt file exists (kind: value|policy)."""
+    return _supervised_weight(kind) is not None
+
+
+def has_rl_weights(kind: str) -> bool:
+    """True when a self-play RL checkpoint for <kind> exists in nn/weights/rl/."""
+    return _rl_weight(kind) is not None
 
 _CHAR_TO_PROMO = {
     'n': PieceType.KNIGHT, 'b': PieceType.BISHOP,
@@ -226,15 +233,56 @@ class PolicyBackend:
 
 # -- Weight loading ----------------------------------------------------------
 
-def _latest_weights(kind: str) -> Path:
-    """Most recent nn/weights/*_<kind>.pt (timestamped names sort by recency)."""
+def _supervised_weight(kind: str) -> Path | None:
+    """Most recent supervised nn/weights/*_<kind>.pt, or None (timestamps sort)."""
     matches = sorted(_WEIGHTS_DIR.glob(f"*_{kind}.pt"))
-    if not matches:
+    return matches[-1] if matches else None
+
+
+def _rl_weight(kind: str) -> Path | None:
+    """Best self-play RL checkpoint for <kind> from nn/weights/rl/, or None.
+
+    Prefers the gate-accepted best, then the latest candidate, then the most
+    recent timestamped generation file.
+    """
+    best = _RL_DIR / f"best_{kind}.pt"
+    if best.exists():
+        return best
+    latest = _RL_DIR / f"latest_{kind}.pt"
+    if latest.exists():
+        return latest
+    matches = sorted(_RL_DIR.glob(f"*_{kind}.pt"))
+    return matches[-1] if matches else None
+
+
+def _latest_weights(kind: str) -> Path:
+    """Most recent supervised nn/weights/*_<kind>.pt (used for RL warm-start)."""
+    path = _supervised_weight(kind)
+    if path is None:
         raise FileNotFoundError(
             f"no '{kind}' weights in {_WEIGHTS_DIR}. Train one first, e.g. "
             f"python -m nn.train --mode {kind} --max-games 2000 --epochs 5"
         )
-    return matches[-1]
+    return path
+
+
+def _resolve_weights(kind: str, source: str) -> Path:
+    """Resolve <kind> weights for the requested source ('supervised' | 'rl').
+
+    Falls back to the other source when the requested one is empty, so the GUI
+    can load whichever nets exist; raises only when neither source has any.
+    """
+    rl_first = source == "rl"
+    primary   = _rl_weight(kind) if rl_first else _supervised_weight(kind)
+    secondary = _supervised_weight(kind) if rl_first else _rl_weight(kind)
+    path = primary or secondary
+    if path is None:
+        where = f"{_WEIGHTS_DIR} or {_RL_DIR}"
+        raise FileNotFoundError(
+            f"no '{kind}' weights in {where}. Train one first "
+            f"(python -m nn.train --mode {kind} ...) or run self-play (python -m nn.rl)."
+        )
+    return path
 
 
 def _load_net(net, weights: Path, device: str):
@@ -246,8 +294,10 @@ def _load_net(net, weights: Path, device: str):
 
 # -- Factory -----------------------------------------------------------------
 
-def _build_evaluator(name: str, device: str, weights: str | None):
-    """Build a BaseEvaluate from a name; 'nn' loads the value network."""
+def _build_evaluator(name: str, device: str, weights: str | None,
+                     weights_source: str = "supervised"):
+    """Build a BaseEvaluate from a name; 'nn' loads the value network (from the
+    supervised or RL checkpoints, per weights_source)."""
     from engine.evaluate import SimpleEvaluate, MediumEvaluate, ComplexEvaluate
 
     if name == "simple":
@@ -259,7 +309,7 @@ def _build_evaluator(name: str, device: str, weights: str | None):
     if name == "nn":
         from nn.network import ValueNet
         from nn.inference import NNEvaluate
-        path = Path(weights) if weights else _latest_weights("value")
+        path = Path(weights) if weights else _resolve_weights("value", weights_source)
         net = _load_net(ValueNet(), path, device)
         return NNEvaluate(net, device)
     raise ValueError(f"unknown evaluation '{name}'")
@@ -268,8 +318,14 @@ def _build_evaluator(name: str, device: str, weights: str | None):
 def make_engine(lang: str = "py", search: str = "alphabeta", evaluator: str = "medium",
                 device: str = "cpu", value_weights: str | None = None,
                 policy_weights: str | None = None, cpp_command: str | None = None,
-                rust_command: str | None = None, tt_size_mb: int = 32):
-    """Build the bot backend chosen by the command line args (see module docstring)."""
+                rust_command: str | None = None, tt_size_mb: int = 32,
+                weights_source: str = "supervised"):
+    """Build the bot backend chosen by the command line args (see module docstring).
+
+    weights_source selects which network checkpoints the 'nn' eval and 'policy'
+    search load: 'supervised' (nn/weights) or 'rl' (nn/weights/rl). An explicit
+    value_weights/policy_weights path still overrides it.
+    """
     if lang == "cpp":
         return UCIBackend(cpp_command or DEFAULT_CPP_COMMAND, evaluator)
     if lang == "rust":
@@ -277,10 +333,10 @@ def make_engine(lang: str = "py", search: str = "alphabeta", evaluator: str = "m
 
     if search == "policy":
         from nn.network import PolicyNet
-        path = Path(policy_weights) if policy_weights else _latest_weights("policy")
+        path = Path(policy_weights) if policy_weights else _resolve_weights("policy", weights_source)
         net = _load_net(PolicyNet(), path, device)
         return PolicyBackend(net, device)
 
     from engine.search import Search
-    return Search(evaluator=_build_evaluator(evaluator, device, value_weights),
+    return Search(evaluator=_build_evaluator(evaluator, device, value_weights, weights_source),
                   tt_size_mb=tt_size_mb)

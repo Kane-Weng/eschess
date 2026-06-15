@@ -118,16 +118,26 @@ def draw_engine_settings(screen, x, y, width, pending, avail, dirty) -> int:
     y = _label(screen, "Move source" if is_py else "Move source (Python only)", x, y)
     y = _segment(screen, x, y, width, ["alphabeta", "policy"], pending["search"],
                  lambda o: ("set", "search", o),
-                 {"alphabeta": is_py, "policy": is_py and avail["policy"]}, hotspots)
+                 {"alphabeta": is_py,
+                  "policy": is_py and (avail["policy"] or avail["policy_rl"])}, hotspots)
 
     # C++/Rust share the simple/medium/complex tiers; only alpha-beta Python has 'nn'.
     eval_on = (is_py and is_ab) or not is_py
-    nn_on = is_py and is_ab and avail["value"]
+    nn_on = is_py and is_ab and (avail["value"] or avail["value_rl"])
     y = _label(screen, "Evaluation" if eval_on else "Evaluation (alpha-beta only)", x, y)
     y = _segment(screen, x, y, width, ["simple", "medium", "complex", "nn"],
                  pending["eval"], lambda o: ("set", "eval", o),
                  {"simple": eval_on, "medium": eval_on, "complex": eval_on,
                   "nn": nn_on}, hotspots)
+
+    kind = "policy" if pending["search"] == "policy" else "value"
+    net_active = is_py and ((is_ab and pending["eval"] == "nn") or pending["search"] == "policy")
+    sup_on = net_active and avail[kind]
+    rl_on  = net_active and avail[f"{kind}_rl"]
+    y = _label(screen, "Weights" if net_active else "Weights (nn eval / policy only)", x, y)
+    y = _segment(screen, x, y, width, ["supervised", "rl"], pending["weights"],
+                 lambda o: ("set", "weights", o),
+                 {"supervised": sup_on, "rl": rl_on}, hotspots)
 
     hi = 5 if is_py else 8
     depth_on = not (is_py and pending["search"] == "policy")

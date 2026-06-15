@@ -394,7 +394,10 @@ def draw_captured_tray(screen: pygame.Surface, x: int, y: int, width: int,
 
 def main(args):
     pygame.init()
-    screen = pygame.display.set_mode((WINDOW_W, WINDOW_H))
+    screen = pygame.display.set_mode(
+        (WINDOW_W, WINDOW_H), 
+        pygame.SCALED | pygame.RESIZABLE | pygame.WINDOWMAXIMIZED
+    )
     pygame.display.set_caption("ESCHESS")
     clock = pygame.time.Clock()
 
@@ -403,21 +406,24 @@ def main(args):
 
     # Availability of the optional backends, for greying out menu controls.
     avail = {
-        "cpp":    engine_backend.cpp_available(args.cpp_command),
-        "rust":   engine_backend.rust_available(args.rust_command),
-        "value":  engine_backend.has_weights("value"),
-        "policy": engine_backend.has_weights("policy"),
+        "cpp":       engine_backend.cpp_available(args.cpp_command),
+        "rust":      engine_backend.rust_available(args.rust_command),
+        "value":     engine_backend.has_weights("value"),
+        "policy":    engine_backend.has_weights("policy"),
+        "value_rl":  engine_backend.has_rl_weights("value"),
+        "policy_rl": engine_backend.has_rl_weights("policy"),
     }
 
     # Live-editable settings
-    applied = {"lang": args.lang, "search": args.search,
-               "eval": args.eval, "depth": args.depth}  # current engine
-    pending = dict(applied)                             # menu settings
+    applied = {"lang": args.lang, "search": args.search, "eval": args.eval,
+               "weights": args.weights, "depth": args.depth}  # current engine
+    pending = dict(applied)                                    # menu settings
 
     def build_engine(settings):
         return make_engine(
             lang=settings["lang"], search=settings["search"], evaluator=settings["eval"],
             device=args.device, cpp_command=args.cpp_command, rust_command=args.rust_command,
+            weights_source=settings["weights"],
         )
 
     engine = build_engine(applied)
@@ -548,10 +554,21 @@ def main(args):
         viz_mode = mode
         _apply_multipv()
 
+    def _normalize_weights():
+        """Keep the weights source on a source that actually has the active net's
+        checkpoints, so selecting 'nn'/'policy' just works when only one exists."""
+        kind = "policy" if pending["search"] == "policy" else "value"
+        if pending["weights"] == "supervised" and not avail[kind] and avail[f"{kind}_rl"]:
+            pending["weights"] = "rl"
+        elif pending["weights"] == "rl" and not avail[f"{kind}_rl"] and avail[kind]:
+            pending["weights"] = "supervised"
+
     def _set_pending(key, value):
         pending[key] = value
         if key == "lang":
             pending["depth"] = min(pending["depth"], _depth_cap())
+        if key in ("search", "eval", "weights"):
+            _normalize_weights()
         # Apply immediately when the engine is idle (player's turn); otherwise the
         # change is staged and applied once the bot finishes its current move.
         if not bot["thinking"]:
@@ -755,6 +772,9 @@ def parse_args():
     parser.add_argument("--eval", choices=("simple", "medium", "complex", "nn"), default="medium",
                         help="evaluation for alpha-beta search; 'nn' is the value network "
                              "(ignored when --search policy or --lang cpp)")
+    parser.add_argument("--weights", choices=("supervised", "rl"), default="supervised",
+                        help="network checkpoints for 'nn' eval / 'policy' search: "
+                             "supervised (nn/weights) or self-play RL (nn/weights/rl)")
     parser.add_argument("--depth", type=int, default=BOT_DEPTH, help="bot search depth")
     parser.add_argument("--device", default="cpu", help="torch device for the networks")
     parser.add_argument("--cpp-command", default=None, help="override the C++ UCI binary path")

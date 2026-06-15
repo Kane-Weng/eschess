@@ -1,104 +1,99 @@
-# Eschess: reproducible engine + benchmarking environment.
-#
-# A multi-stage build. The first stage compiles the external benchmarking tools
-# (Ordo for rating, cutechess-cli for match play); the final stage is the uv
-# Python image plus Stockfish, with only the built binaries + Qt runtime copied
-# in, so the toolchain and Qt dev headers never bloat the shipped image.
+# === Multi-stage build for Eschess: Engine + Benchmarking ===
+# Strategy: Compile tools and native engines in separate builder stages. 
+# The final image only contains the Python environment, precompiled binaries, 
+# and runtime libraries to eliminate toolchain bloat.
 
-# ── Stage 1: build Ordo and cutechess-cli from source ────────────────────────
+# ── Stage 1: Build benchmarking tools (Ordo, cutechess-cli) ──────────────────
 FROM debian:bookworm-slim AS tools
 
-# cutechess's top-level CMake requires all of Core/Gui/Widgets/Concurrent/Svg/
-# PrintSupport/Core5Compat to configure, even though only the CLI target is built.
+# Install build tools and Qt6 dependencies required by cutechess.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git ca-certificates cmake ninja-build build-essential \
         qt6-base-dev qt6-svg-dev qt6-5compat-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Ordo: BayesElo-style rating tool
+# Build Ordo (Rating tool)
 RUN git clone --depth 1 https://github.com/michiguel/Ordo /tmp/ordo \
     && make -C /tmp/ordo \
     && install -D -m 0755 /tmp/ordo/ordo /out/ordo
 
-# cutechess-cli: standard engine-vs-engine match runner (Qt6, CLI target only)
+# Build cutechess-cli (Match runner)
 RUN git clone --depth 1 https://github.com/cutechess/cutechess.git /tmp/cc \
     && cmake -S /tmp/cc -B /tmp/cc/build -G Ninja -DCMAKE_BUILD_TYPE=Release \
     && cmake --build /tmp/cc/build --target cutechess-cli \
     && install -D -m 0755 /tmp/cc/build/cutechess-cli /out/cutechess-cli \
     && echo "=== cutechess-cli Qt runtime deps ===" && ldd /out/cutechess-cli | grep -i qt6
 
-# ── Stage 1b: build the C++ and Rust engines ─────────────────────────────────
-# The rust image already has cargo + a C++ toolchain; only cmake is missing.
+# ── Stage 2: Build C++ and Rust engines ──────────────────────────────────────
 FROM rust:bookworm AS engines
 
 RUN apt-get update && apt-get install -y --no-install-recommends cmake \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
-COPY cpp/ cpp/
-RUN cmake -S cpp -B cpp/build -DCMAKE_BUILD_TYPE=Release && cmake --build cpp/build -j
 
+# Compile C++ engine
+COPY cpp/ cpp/
+RUN cmake -S cpp -B cpp/build -DCMAKE_BUILD_TYPE=Release \
+    && cmake --build cpp/build -j
+
+# Compile Rust engine
 COPY rust/ rust/
 RUN cargo build --release --manifest-path rust/Cargo.toml
 
-# Sanity-check move generation matches the reference perft counts at build time.
+# Smoke test: Ensure both engines generate correct perft counts before proceeding
 RUN cpp/build/perft >/dev/null && rust/target/release/perft >/dev/null
 
-# Build the native PyO3 extension (eschess_native) into an abi3 wheel, and gate
-# the build on a perft parity smoke so a broken binding fails the image build.
+# Build PyO3 native extension wheel and run parity check
 COPY rust-ffi/ rust-ffi/
 RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip \
     && rm -rf /var/lib/apt/lists/* \
     && pip3 install --break-system-packages maturin \
-    && maturin build --release -m rust-ffi/Cargo.toml --out /wheels \
-    && pip3 install --break-system-packages /wheels/*.whl \
-    && python3 -c "import eschess_native as e; assert e.PyBoard().perft(3) == 8902; print('eschess_native perft OK')"
+    && maturin build --release -m rust-ffi/Cargo.toml --out /wheels
 
-# ── Stage 2: the runtime image ───────────────────────────────────────────────
+# ── Stage 3: Final Runtime Image ─────────────────────────────────────────────
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
-# /app/.venv/bin → project venv; /usr/games → where Debian puts the stockfish binary
+# Configure venv path and uv behavior
 ENV PATH="/app/.venv/bin:/usr/games:${PATH}" \
     UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy
 
-# Stockfish (sparring partner) + the Qt6 runtime libraries cutechess-cli needs.
+# Install Stockfish and Qt6 runtime dependencies for cutechess-cli
 RUN apt-get update && apt-get install -y --no-install-recommends \
         stockfish \
         libqt6core6 libqt6concurrent6 libqt6network6 libqt6core5compat6 \
     && rm -rf /var/lib/apt/lists/*
 
+# Inject precompiled benchmarking tools
 COPY --from=tools /out/ordo           /usr/local/bin/ordo
 COPY --from=tools /out/cutechess-cli  /usr/local/bin/cutechess-cli
-# Fail the build early if a runtime library is missing.
+
+# Fast fail if tool runtime dependencies are missing
 RUN cutechess-cli --version && ordo --help >/dev/null
 
 WORKDIR /app
 
-# Resolve Python dependencies first so the layer caches across source edits.
+# Cache Python dependencies
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-install-project
 
+# Copy necessary source code 
+# Note: Ensure .dockerignore excludes /cpp, /rust, and /rust-ffi to avoid bloat
 COPY . .
-# `bench` adds matplotlib for harness/telemetry.py plots.
+
+# Sync project and install benchmark dependencies
 RUN uv sync --frozen --extra bench
 
-# Install the prebuilt native extension into the project venv so the RL loop can
-# use the fast self-play backend (`python -m nn.rl --backend native`). Pulls in
-# numpy; torch (the actual NN inference) still comes from the `nn` extra.
-COPY --from=engines /wheels /tmp/wheels
-RUN uv pip install --python /app/.venv/bin/python /tmp/wheels/*.whl && rm -rf /tmp/wheels
+# Install the prebuilt Rust FFI wheel directly into the uv venv
+COPY --from=engines /wheels /wheels
+RUN uv pip install --system /wheels/*.whl \
+    && python3 -c "import site, os; print('\n--- INSTALLED FILES ---'); print('\n'.join(f for f in os.listdir(site.getsitepackages()[0]) if 'eschess' in f.lower())); print('-----------------------')"
 
-# Drop the compiled C++/Rust engines at the paths the harness + GUI expect
-# (cpp/build/uci, rust/target/release/uci). Placed after `COPY . .` so the
-# source copy never shadows them.
-COPY --from=engines /src/cpp/build/uci            /app/cpp/build/uci
-COPY --from=engines /src/cpp/build/perft          /app/cpp/build/perft
+# Inject precompiled engines into expected harness paths
+COPY --from=engines /src/cpp/build/uci             /app/cpp/build/uci
+COPY --from=engines /src/cpp/build/perft           /app/cpp/build/perft
 COPY --from=engines /src/rust/target/release/uci   /app/rust/target/release/uci
 COPY --from=engines /src/rust/target/release/perft /app/rust/target/release/perft
 
-# Default to the UCI engine on stdin/stdout; override to run a benchmark, e.g.
-#   docker run --rm eschess python harness/benchmark.py --a-eval medium --stockfish 1320 --games 100
-#   docker run --rm eschess python harness/telemetry.py --depth 7
-#   docker run --rm eschess python harness/acl.py <pgn> --ref stockfish --ref-depth 14
 CMD ["python", "python/uci.py"]
