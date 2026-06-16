@@ -1,0 +1,40 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import EngineSandbox from "../components/sandbox/EngineSandbox.svelte";
+---
+
+<BaseLayout
+  title="Engine Sandbox | Eschess"
+  description="Play the Eschess engine in the browser and watch it think: live evaluation, principal variation, top-move ranking, and search-effort overlays."
+>
+  <main class="mx-auto max-w-6xl px-6 pb-24">
+    <nav class="pt-10 text-sm">
+      <a href="/" class="text-slate-500 hover:text-slate-300">&larr; Eschess</a>
+    </nav>
+
+    <header class="border-b border-white/5 pt-8 pb-8">
+      <div class="flex items-center gap-5">
+        <span class="text-6xl leading-none text-[var(--color-accent)]" aria-hidden="true">♞</span>
+        <div>
+          <p class="text-xs uppercase tracking-widest text-slate-500">Module</p>
+          <h1 class="mt-1 font-[var(--font-display)] text-3xl font-bold tracking-tight sm:text-4xl">
+            Engine Sandbox
+          </h1>
+          <p class="mt-1 max-w-2xl text-sm text-slate-400">
+            Competition mode. Play White against the engine, then watch it think on
+            its reply. The search runs entirely in your browser, a TypeScript port of
+            the Python alpha-beta engine. Switch the evaluation tier and depth, then
+            turn on a visualization to watch the engine's search unfold as it moves:
+            candidate lines appear and re-rank, the principal variation switches as
+            deeper refutations surface, and the node-density shows where it spent its
+            effort.
+          </p>
+        </div>
+      </div>
+    </header>
+
+    <div class="mt-8">
+      <EngineSandbox client:only="svelte" />
+    </div>
+  </main>
+</BaseLayout>

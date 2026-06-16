@@ -4,22 +4,154 @@ piece: "♝"
 pieceName: "Bishop"
 title: "The Long Diagonal"
 theme: "Seeing the board differently."
-summary: "From handcrafted piece-square tables to deep networks — an AlphaZero-style pipeline where a policy net predicts moves, a value net judges positions, and MCTS ties them together."
-draft: true
+summary: "From handcrafted piece-square tables to a deep network: an AlphaZero-style pipeline where a policy net proposes moves, a value net judges positions, and MCTS ties them together inside a self-play loop."
+draft: false
 ---
 
-The bishop sees the board along the diagonals — a different geometry from everything
-else. This chapter is about teaching the engine to see positions differently too:
-moving from handcrafted evaluation to learned evaluation.
+import CodeReveal from "../../components/CodeReveal.astro";
+import PieceSquareHeatmap from "../../components/PieceSquareHeatmap.svelte";
 
-## Learning to evaluate
+export const residualBlock = `class ResidualBlock(nn.Module):
+    """Two convolutions whose output is added back to the block input."""
 
-It transitions from static **piece-square tables** to deep **convolutional / ResNet**
-networks: a **policy network** that predicts promising moves and a **value network**
-that scores positions. Those nets guide a **Monte Carlo Tree Search**, trained in an
-**AlphaZero-style** self-play reinforcement-learning loop.
+    def __init__(self, channels):
+        super().__init__()
+        self.conv1 = nn.Conv2d(channels, channels, kernel_size=3, padding=1, bias=False)
+        self.norm1 = nn.BatchNorm2d(channels)
+        self.conv2 = nn.Conv2d(channels, channels, kernel_size=3, padding=1, bias=False)
+        self.norm2 = nn.BatchNorm2d(channels)
 
-> *Coming soon:* a board heatmap projecting where the network's attention is focused
-> before it commits to a move.
+    def forward(self, x):
+        out = torch.relu(self.norm1(self.conv1(x)))
+        out = self.norm2(self.conv2(out))
+        return torch.relu(out + x)   # the skip connection`;
 
-This chapter is still being written.
+export const heads = `class PolicyNet(nn.Module):
+    """Maps a board tensor to from-to move logits."""
+    def forward(self, x):
+        out = self.head(self.trunk(x))
+        return self.fc(out.flatten(start_dim=1))      # POLICY_SIZE = 64*64 logits
+
+class ValueNet(nn.Module):
+    """Maps a board tensor to a single scalar in [-1, 1]."""
+    def forward(self, x):
+        out = self.head(self.trunk(x))
+        out = torch.relu(self.fc1(out.flatten(start_dim=1)))
+        return torch.tanh(self.fc2(out)).squeeze(-1)  # -1 lost ... +1 won`;
+
+export const puct = `def _select_child(self, node):
+    """Pick the child maximising Q + U (PUCT)."""
+    sqrt_total = math.sqrt(node.visit_count)
+    best_score, best = -float("inf"), None
+    for move_key, child in node.children.items():
+        # child.mean_value() is the opponent's perspective, so negate it.
+        q = -child.mean_value()
+        u = self.c_puct * child.prior * sqrt_total / (1 + child.visit_count)
+        score = q + u                      # exploit known value + explore by prior
+        if score > best_score:
+            best_score, best = score, (move_key, child)
+    return best`;
+
+export const rlLoop = `for generation in range(1, args.generations + 1):
+    # 1. self-play: best network plays itself, MCTS visit counts are the targets
+    gen_samples = selfplay(best_policy, best_value, args.games_per_gen)
+    buffer.append(gen_samples)
+    del buffer[: -args.buffer_gens]        # keep only recent generations
+
+    # 2. train a candidate on the replay buffer
+    candidate_policy = copy.deepcopy(best_policy)
+    candidate_value = copy.deepcopy(best_value)
+    train_policy_soft(candidate_policy, dataset, ...)   # cross-entropy to visits
+    train_value(candidate_value, dataset, ...)          # MSE to game outcome
+
+    # 3. gate: candidate must beat the current best to be promoted
+    gate_score = evaluate_gate(candidate, best, args.gate_games, ...)
+    if gate_score >= args.gate_threshold:
+        best_policy, best_value = candidate_policy, candidate_value`;
+
+The bishop sees the board along the diagonals, a different geometry from every other
+piece. This chapter is about teaching the engine to see positions differently too:
+moving from evaluation a human wrote down to evaluation a network learns on its own.
+
+## Where the knowledge starts: by hand
+
+The classical engine in the Pawn chapter judges a position with **piece-square tables**:
+for every piece type, a grid of small bonuses and penalties saying where that piece wants
+to stand. A knight in the centre is worth more than a knight in the corner, a pawn on the
+seventh rank is nearly a queen, the king hides in the midgame and marches in the endgame.
+It is real chess knowledge, and it is entirely handwritten.
+
+<PieceSquareHeatmap client:visible />
+
+These tables work, but they are static. They cannot tell that a knight is well placed
+*because* it cannot be driven away, or that a backward pawn only matters when the position
+opens. Every piece of nuance has to be anticipated and coded by a human. The bishop's
+question is whether the engine can learn the map instead of being handed it.
+
+## Learning to see: two networks
+
+The answer is to replace the handwritten tables with a neural network that reads the board
+as a stack of planes, one per piece type and colour plus some state, and processes it the
+way a vision model processes an image. The trunk is a small **ResNet**: convolutions that
+look at local patterns, with skip connections so the network can go deep without the
+training signal fading.
+
+<CodeReveal
+  concept="The residual block"
+  summary="Two convolutions whose output is added back to the input, so gradients flow straight through and the trunk can stack deep."
+  source="python/nn/network.py · ResidualBlock"
+  code={residualBlock}
+/>
+
+On top of that shared trunk sit two heads, because the engine needs two different
+judgements. The **policy network** answers "which moves look promising here?" and outputs a
+score for every possible from-to move. The **value network** answers "who is winning?" and
+outputs a single number between -1 (lost) and +1 (won). One reads the board, two questions.
+
+<CodeReveal
+  concept="Policy and value heads"
+  summary="The policy head flattens to 64x64 move logits; the value head collapses to a single tanh score in [-1, 1]."
+  source="python/nn/network.py · PolicyNet + ValueNet"
+  code={heads}
+/>
+
+## Tying them together: MCTS
+
+Neither network plays chess on its own. The policy net is only a hunch and the value net
+only a guess; trusting either blindly plays weak moves. **Monte Carlo Tree Search** turns
+the two hunches into a real search. It grows a tree of variations, and at each step it
+picks which move to explore next by balancing two pulls: the value already seen down a
+line, and the policy's prior belief, damped by how often that move has already been tried.
+That balance is the **PUCT** formula.
+
+<CodeReveal
+  concept="PUCT: exploit plus explore"
+  summary="Each child scores its known mean value (negated, since it is the opponent's view) plus an exploration bonus from its policy prior and visit count."
+  source="python/nn/mcts.py · MCTS._select_child"
+  code={puct}
+/>
+
+Run that selection a few hundred times and the moves the search actually spent its visits
+on become a sharpened policy, far better than the raw network hunch. The most-visited move
+is the one to play, and the whole visit distribution becomes a training target.
+
+## The loop that improves itself
+
+This is the AlphaZero idea, and it closes into a loop with no human games anywhere in it.
+The current best network plays thousands of games against itself. Each position's MCTS
+visit counts train a candidate policy toward better move choices, and each game's final
+result trains a candidate value toward better verdicts. Then comes the part that keeps the
+loop honest: the candidate only replaces the best network if it can actually **beat** it
+over a gauntlet of games.
+
+<CodeReveal
+  concept="One generation of self-play RL"
+  summary="Self-play to generate data, train a candidate on the recent replay buffer, then gate: promote only if the candidate outscores the current best."
+  source="python/nn/rl.py · run_rl"
+  code={rlLoop}
+/>
+
+The gate matters. Training loss going down does not guarantee stronger play, so the only
+metric that promotes a network is winning games against the standard it is trying to
+beat. The same yardstick the Rook chapter built for benchmarking is what decides whether
+the bishop's new way of seeing is genuinely sharper, or just different.

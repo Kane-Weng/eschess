@@ -2,9 +2,14 @@
   // Cinematic 3D chess background. Auto-plays Byrne vs. Fischer, 1956
   // ("The Game of the Century"), one move every ~1.5s, then loops.
   //
+  // The camera holds a single fixed first-person vantage behind White's back
+  // rank — no panning, no piece-chasing. (An earlier version retargeted
+  // lookAt() at each move and the look vector degenerated whenever the focal
+  // point crossed near/behind the eye on the back rank, making the view flip,
+  // freeze, or snap. A static camera can't degenerate.)
+  //
   // Completely non-interactive (pointer-events: none) and darkened by an
   // overlay so landing-page text stays legible on top.
-  import * as THREE from "three";
   import { Canvas, T } from "@threlte/core";
   import { Tween } from "svelte/motion";
   import { cubicInOut } from "svelte/easing";
@@ -25,9 +30,7 @@
 
 1. Nf3 Nf6 2. c4 g6 3. Nc3 Bg7 4. d4 O-O 5. Bf4 d5 6. Qb3 dxc4 7. Qxc4 c6 8. e4 Nbd7 9. Rd1 Nb6 10. Qc5 Bg4 11. Bg5 Na4 12. Qa3 Nxc3 13. bxc3 Nxe4 14. Bxe7 Qb6 15. Bc4 Nxc3 16. Bc5 Rfe8+ 17. Kf1 Be6 18. Bxb6 Bxc4+ 19. Kg1 Ne2+ 20. Kf1 Nxd4+ 21. Kg1 Ne2+ 22. Kf1 Nc3+ 23. Kg1 axb6 24. Qb4 Ra4 25. Qxb6 Nxd1 26. h3 Rxa2 27. Kh2 Nxf2 28. Re1 Rxe1 29. Qd8+ Bf8 30. Nxe1 Bd5 31. Nf3 Ne4 32. Qb8 b5 33. h4 h5 34. Ne5 Kg7 35. Kg1 Bc5+ 36. Kf1 Ng3+ 37. Ke1 Bb4+ 38. Kd1 Bb3+ 39. Kc1 Ne2+ 40. Kb1 Nc3+ 41. Kc1 Rc2# 0-1`;
 
-  const TURN_MS = 1200; // gaze swing to the next piece
-  const TRACK_MS = 1050; // piece + gaze travel during a move (matches the slide)
-  const HOLD_MS = 1000; // pause on the result before turning to the next piece
+  const MOVE_MS = 1500; // cadence between moves (the piece slide is 1050ms)
   const START_DELAY = 2700; // let the eyes open before the first move
   const FADE_MS = 900; // capture lift + fade duration before removal
   const LOOP_PAUSE_MS = 4500; // pause on the final position before restarting
@@ -123,126 +126,64 @@
     generation += 1;
   }
 
-  // ---- Camera gaze --------------------------------------------------------
-  const EYE_HEIGHT = 1.35; // fixed head height (no raise — eyes just open)
-  const KING_DZ = -0.25; // eye offset from the king's square center
-  const GAZE_TAU = 0.34; // gaze smoothing time-constant (~1s to settle a turn)
-
-  const startEye = squareToWorld("e1");
-
-  // Where the camera is looking, as a plain world point. We deliberately do NOT
-  // tween this point through space and feed it to camera.lookAt() each frame:
-  // when the focal point slides past the camera's own position — e.g. turning
-  // toward a back-rank square, which sits *behind* the eye on rank 1 — the look
-  // vector degenerates and the view flips / freezes / snaps. Instead the render
-  // loop damps the camera's ORIENTATION toward facing this point with a quaternion
-  // slerp (a real head turn: shortest-arc, never degenerate). Retargeting is thus
-  // instantaneous; all the easing lives in the slerp.
-  const lookTarget = new THREE.Vector3(startEye.x, 0.4, startEye.z - 5);
-  const lookAt = (square: string) => {
-    const s = squareToWorld(square);
-    lookTarget.set(s.x, 0.5, s.z);
-  };
-  const lookPoint = (x: number, y: number, z: number) =>
-    lookTarget.set(x, y, z);
-
-  // The camera's ground position = the white king's square (first person). Eased,
-  // and only retargeted when the king actually moves.
-  const eyeTween = new Tween(
-    { x: startEye.x, z: startEye.z + KING_DZ },
-    { duration: TRACK_MS, easing: cubicInOut },
-  );
-  const moveEyeTo = (square: string, ms: number) => {
-    const s = squareToWorld(square);
-    eyeTween.set({ x: s.x, z: s.z + KING_DZ }, { duration: ms });
-  };
-
-  // Drive the game with a self-rescheduling timer. Each move has the same rhythm:
-  // turn the gaze to this move's subject (TURN_MS) → the piece moves and the gaze
-  // tracks it (TRACK_MS) → hold on the result (HOLD_MS) → on to the next.
+  // Drive the game with a self-rescheduling timer: apply one move every
+  // MOVE_MS, and when the game ends, pause then restart. The camera is fully
+  // independent of this (see below) — moves just play out in front of it.
   $effect(() => {
     let timer: ReturnType<typeof setTimeout>;
 
-    const SURVEY = { x: 0, y: 0.5, z: startEye.z - 6 }; // forward, down the board
-
     function tick() {
       if (ply >= history.length) {
-        lookPoint(SURVEY.x, SURVEY.y, SURVEY.z); // survey the final position
         timer = setTimeout(() => {
           restart();
-          moveEyeTo("e1", 0); // snap the camera back for the new game
-          lookPoint(SURVEY.x, SURVEY.y, SURVEY.z);
           timer = setTimeout(tick, START_DELAY);
         }, LOOP_PAUSE_MS);
         return;
       }
-
-      const m = history[ply];
-      const whiteKingMove = m.color === "w" && m.piece === "k";
-
-      // 1. Turn the gaze toward this move's subject. The camera *is* the white
-      //    king, so on its own move it can't look at its own (back-rank) square:
-      //    it has been watching Black's move through the hold, so it now turns to
-      //    look down the board before stepping. Otherwise it faces the moving piece.
-      if (whiteKingMove) lookPoint(SURVEY.x, SURVEY.y, SURVEY.z);
-      else lookAt(m.from);
-
-      timer = setTimeout(() => {
-        // 2. Apply the move; the camera tracks — following the piece to its
-        //    destination, or, for a king move, stepping aside (the gaze stays
-        //    down-board, so the turn in step 1 and the step here both read).
-        applyMove(m);
-        ply += 1;
-        if (whiteKingMove) moveEyeTo(m.to, TRACK_MS);
-        else lookAt(m.to);
-        // 3. Hold on the result, then continue.
-        timer = setTimeout(tick, TRACK_MS + HOLD_MS);
-      }, TURN_MS);
+      applyMove(history[ply]);
+      ply += 1;
+      timer = setTimeout(tick, MOVE_MS);
     }
 
     timer = setTimeout(tick, START_DELAY);
     return () => clearTimeout(timer);
   });
 
-  // First-person camera embodying the white king (its own mesh is hidden, so we
-  // never sit inside it). The position follows the king (eased); the orientation
-  // damps toward facing `lookTarget` via a per-frame quaternion slerp — a smooth
-  // head turn that always takes the shortest arc and never degenerates the way a
-  // focal point lerped through the camera does.
-  let camera = $state<any>(undefined);
+  // ---- Camera ---------------------------------------------------------------
+  // The eye sits behind White's back rank (where the king would stand — its mesh
+  // is hidden, so we never look at ourselves), at a fixed height and pitch tilted
+  // down so the board fills the lower frame. The pitch/orientation stays fixed;
+  // only the ground position moves. (Moving the position is safe — the old
+  // flip/freeze came from retargeting lookAt(), not from moving the eye.)
+  const HOME = { x: 0.5, z: 4.0 }; // home vantage behind e1
+  const EYE_HEIGHT = 1.4;
+  const BASE_PITCH = -0.18; // radians; tilt down toward the board
+
+  // The eye keeps a fixed offset *behind* the king's square — so at e1 it equals
+  // HOME — and the camera glides to preserve that vantage as the king moves.
+  const KING_E1 = squareToWorld("e1");
+  const KING_DX = HOME.x - KING_E1.x;
+  const KING_DZ = HOME.z - KING_E1.z;
+  const eyeForKing = (sq: string) => {
+    const s = squareToWorld(sq);
+    return { x: s.x + KING_DX, z: s.z + KING_DZ };
+  };
+
+  // Eased eye position, fed to the camera's `position` prop. Calling eye.set(...)
+  // glides the camera there; the prop updates reactively from eye.current.
+  const eye = new Tween(eyeForKing("e1"), {
+    duration: 1100,
+    easing: cubicInOut,
+  });
+
+  // Follow the white king (the camera *is* the king — its mesh is hidden). The
+  // king's square lives in the tracked-piece model; whenever it changes — a king
+  // move, castling, or the reset to e1 on restart — glide the eye to match.
+  const whiteKingSquare = $derived(
+    pieces.find((p) => p.color === "w" && p.type === "k")?.square ?? "e1",
+  );
   $effect(() => {
-    const UP = new THREE.Vector3(0, 1, 0);
-    const aimAt = new THREE.Vector3();
-    const lookMat = new THREE.Matrix4();
-    const desired = new THREE.Quaternion();
-    let raf = 0;
-    let prev = 0;
-    const loop = (now: number) => {
-      const dt = prev ? Math.min((now - prev) / 1000, 0.05) : 0.016;
-      prev = now;
-      if (camera) {
-        const e = eyeTween.current;
-        camera.position.set(e.x, EYE_HEIGHT, e.z);
-
-        // Keep the gaze in front of the eye: clamp the target to stay toward -z
-        // (down the board) so we never swing around to look behind at our own
-        // back rank — we look down toward a piece's file instead.
-        aimAt.set(
-          lookTarget.x,
-          lookTarget.y,
-          Math.min(lookTarget.z, camera.position.z - 0.6),
-        );
-
-        // Desired orientation: look from the eye toward the target. Matrix4.lookAt
-        // encodes camera convention (the camera faces along its own -z).
-        lookMat.lookAt(camera.position, aimAt, UP);
-        desired.setFromRotationMatrix(lookMat);
-        camera.quaternion.slerp(desired, 1 - Math.exp(-dt / GAZE_TAU));
-      }
-      raf = requestAnimationFrame(loop);
-    };
-    raf = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(raf);
+    eye.set(eyeForKing(whiteKingSquare));
   });
 </script>
 
@@ -252,12 +193,12 @@
     <T.FogExp2 attach="fog" args={["#0a0f18", 0.032]} />
 
     <T.PerspectiveCamera
-      bind:ref={camera}
       makeDefault
       fov={58}
       near={0.05}
       far={60}
-      position={[0.5, 0.55, 3.6]}
+      position={[eye.current.x, EYE_HEIGHT, eye.current.z]}
+      rotation={[BASE_PITCH, 0, 0, "YXZ"]}
     />
 
     <!-- Lighting: a hemisphere + ambient base so the dark pieces stay readable,

@@ -4,21 +4,154 @@ piece: "♜"
 pieceName: "Rook"
 title: "The Castle"
 theme: "The solid, unshakeable walls holding everything together."
-summary: "Engines are only as good as their tests — UCI protocol integration, an automated match harness, Elo benchmarking, and Average Centipawn Loss against Stockfish."
-draft: true
+summary: "An engine is only as good as its tests: the UCI protocol, an automated match harness, Elo with real confidence intervals, and Average Centipawn Loss measured against Stockfish."
+draft: false
 ---
 
+import CodeReveal from "../../components/CodeReveal.astro";
+import EloCalculator from "../../components/EloCalculator.svelte";
+
+export const uciSnippet = `def bestmove(self, start_fen, moves, go):
+    """Set the position, issue 'go', and return the engine's bestmove token."""
+    pos = "startpos" if start_fen == STARTPOS_FEN else f"fen {start_fen}"
+    suffix = f" moves {' '.join(moves)}" if moves else ""
+    self._send(f"position {pos}{suffix}")
+    self._send(go)
+    for line in self._proc.stdout:
+        if line.startswith("bestmove"):
+            token = line.split()[1]
+            return None if token == "0000" else token
+    return None`;
+
+export const adjudicate = `def game_result(board, rep_counts):
+    """Return '1-0' / '0-1' / '1/2-1/2' if the game is over, else None."""
+    if not board.get_all_legal_moves():
+        if board.is_in_check(board.turn):
+            return "0-1" if board.turn == Color.WHITE else "1-0"   # checkmated
+        return "1/2-1/2"                                           # stalemate
+    if board.halfmove_clock >= 100:
+        return "1/2-1/2"                                           # 50-move rule
+    if rep_counts.get(board.zobrist_key, 0) >= 3:
+        return "1/2-1/2"                                           # threefold
+    if _insufficient_material(board):
+        return "1/2-1/2"
+    return None`;
+
+export const eloMath = `def score_to_elo(score):
+    """Expected-score -> Elo difference (the inverse of the logistic Elo curve)."""
+    score = min(max(score, 1e-12), 1 - 1e-12)
+    return -400.0 * math.log10(1.0 / score - 1.0)
+
+# ... from a win/draw/loss tally:
+mu = p_w + 0.5 * p_d                       # expected score per game
+var = p_w * (1 - mu)**2 + p_d * (0.5 - mu)**2 + p_l * (0 - mu)**2
+stderr = math.sqrt(var / n)               # standard error of the mean score
+
+elo    = score_to_elo(mu)
+elo_lo = score_to_elo(mu - 1.96 * stderr) # 95% confidence interval
+elo_hi = score_to_elo(mu + 1.96 * stderr)
+# Likelihood of superiority: is A genuinely stronger, or just lucky?
+los = 0.5 * (1 + erf((wins - losses) / math.sqrt(2 * decisive)))`;
+
+export const aclLoop = `for mv in moves:
+    mover = white if board.turn == Color.WHITE else black
+    if args.player is None or mover == args.player:
+        phase = _phase(board)                      # opening / middle / endgame
+        best_cp = ref.score_cp(board.to_fen())     # Stockfish, before the move
+        board.make_move(from_sq, to_sq, promo)
+        played_cp = -ref.score_cp(board.to_fen())  # after, from our POV
+        loss = max(0.0, min(args.cap, best_cp - played_cp))
+        sums[(mover, phase)][0] += loss
+        sums[(mover, phase)][1] += 1
+    else:
+        board.make_move(from_sq, to_sq, promo)`;
+
 The rook is the wall: solid, dependable, the structure everything else leans on. This
-chapter is about the infrastructure that keeps the engine honest — because an engine is
-only as good as the tests that measure it.
+chapter is about the infrastructure that keeps the engine honest, because an engine is
+only as good as the tests that measure it. A change that feels like an improvement is
+worthless until something proves it wins more games, and proving that is its own piece
+of engineering.
 
-## Proving it plays
+## Speaking UCI
 
-It covers the **UCI protocol** that lets any GUI or match runner drive the engine, the
-**automated harness** that pits engines against each other, **Elo benchmarking** with
-confidence intervals, and **Average Centipawn Loss (ACL)** measured against a localized
-Stockfish to score move quality by game phase.
+Before two engines can play, they need a shared language. That language is **UCI**, the
+Universal Chess Interface, the same plain-text protocol a desktop chess program uses to
+drive Stockfish. The rules are simple: the controller writes a position and a `go`
+command to the engine's standard input, and the engine writes back a `bestmove`. Every
+Eschess engine, Python, C++, and Rust, speaks it, which is what lets them stand in for
+each other and be driven by the same harness.
 
-> *Coming soon:* a live Elo / ACL dashboard summarizing match results.
+<CodeReveal
+  concept="One move over UCI"
+  summary="Write the position and a go command to the engine's stdin, then read lines back until bestmove appears."
+  source="harness/match.py · UCIProcess.bestmove"
+  code={uciSnippet}
+/>
 
-This chapter is still being written.
+## The match harness
+
+A single game proves nothing. The harness plays *many*: it launches two engine
+subprocesses, feeds both the same opening position so neither gets an easier side, and
+alternates colours across the match so a first-move advantage cancels out. After every
+move it checks whether the game has ended, applying the full rulebook, not just
+checkmate.
+
+<CodeReveal
+  concept="Adjudicating a finished game"
+  summary="Checkmate, stalemate, the fifty-move rule, threefold repetition, and insufficient material all have to be detected, not just mate."
+  source="harness/match.py · game_result"
+  code={adjudicate}
+/>
+
+The output is a PGN file, the standard game-record format, which every downstream tool
+reads. Nothing in the analysis layer cares which engines played; it only reads results.
+
+## From wins to Elo
+
+A record like "+54 =72 -34" is hard to reason about. **Elo** turns it into a single number:
+how many rating points separate the two engines. The expected score follows a logistic
+curve, so inverting that curve maps a winning percentage back to a rating gap.
+
+But the number alone lies. Fifty-four wins out of a hundred and a thousand can give the
+same rating while meaning completely different things, because the second result is far
+more certain. So the harness carries a **95% confidence interval** from the standard error
+of the score, plus a **likelihood of superiority**: the probability the lead is real rather
+than noise.
+
+<CodeReveal
+  concept="Score, interval, and likelihood of superiority"
+  summary="The inverse logistic curve gives the rating; the standard error of the per-game score gives the interval and the LOS."
+  source="harness/elo.py · score_to_elo + head_to_head"
+  code={eloMath}
+/>
+
+Try it. Hold the winning percentage roughly fixed and pile on games: the rating barely
+moves, but the interval collapses and the likelihood of superiority climbs toward
+certainty. That shrinking interval is the entire reason a match runs hundreds of games
+instead of ten.
+
+<EloCalculator client:visible />
+
+## Average Centipawn Loss
+
+Elo says which engine wins. It does not say *how well* either one played. For that the
+harness borrows a much stronger referee, **Stockfish**, and measures **Average Centipawn
+Loss**: for every move, ask the referee what the position was worth before the move and
+after it, and the drop is how much that move cost. Average those losses and you have a
+move-quality score in centipawns, where lower is better and zero is perfect.
+
+<CodeReveal
+  concept="Scoring every move against Stockfish"
+  summary="Evaluate the position before and after each move with a strong reference engine; the loss is the evaluation it gave up, clamped and split by game phase."
+  source="harness/acl.py · main loop"
+  code={aclLoop}
+/>
+
+The losses are bucketed by game **phase**, opening, middlegame, and endgame, because an
+engine can be sharp in the opening and fall apart converting an endgame, and an average
+over the whole game would hide it. That phase split is what turns a single number into a
+diagnosis of where the engine actually needs work.
+
+Together these are the walls of the castle: a shared protocol so engines can meet, a
+harness so they meet fairly, and two independent yardsticks, one for results and one for
+move quality, so every claimed improvement has to earn it.

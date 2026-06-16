@@ -17,8 +17,8 @@
         "client-side at near-native speed; Python/ML stream over a socket. Learning " +
         "mode overlays the searched branches and live evaluations; Competition mode " +
         "lets you tune depth, time, and style.",
-      href: "#engine-sandbox",
-      status: "Planned",
+      href: "/sandbox",
+      status: "Live",
     },
     {
       piece: "♜", // ♜ rook
