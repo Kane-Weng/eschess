@@ -6,6 +6,9 @@ import tailwindcss from "@tailwindcss/vite";
 
 // https://astro.build/config
 export default defineConfig({
+  site: "https://kane-weng.github.io",
+  base: "/eschess",
+
   integrations: [svelte(), mdx()],
   vite: {
     plugins: [tailwindcss()],

@@ -42,4 +42,7 @@ npm run build      # static output in dist/
 
 The landing page is live. Everything else is tracked in [TODO.md](./TODO.md).
 
+
+## 
+
 This work is based on "Chess pieces" (https://sketchfab.com/3d-models/chess-pieces-6c30b70322ff4ebfb5874cf51a4e2bba) by nikolokko (https://sketchfab.com/nikolokko) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
