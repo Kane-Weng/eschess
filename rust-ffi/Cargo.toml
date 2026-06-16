@@ -1,0 +1,30 @@
+# PyO3 bindings + native self-play orchestration over the eschess core crate.
+# Built as a Python extension module (`eschess_native`) via maturin, or directly
+# with `cargo build --release` (produces target/release/libeschess_native.so).
+[package]
+name = "eschess-native"
+version = "0.1.0"
+edition = "2021"
+description = "Python (PyO3) bindings and native AlphaZero self-play for the eschess chess engine."
+
+[lib]
+name = "eschess_native"
+# cdylib: the importable Python extension. rlib: lets `cargo test` link the crate.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Path-dep on the existing core crate so the UCI/perft binaries stay untouched.
+eschess = { path = "../rust" }
+pyo3 = { version = "0.22", features = ["extension-module", "abi3-py312"] }
+numpy = "0.22"
+rayon = "1"
+rand = { version = "0.8", features = ["small_rng"] }
+rand_distr = "0.4"
+
+# Own release profile (the core crate's `panic = "abort"` does not apply when the
+# core is built as a dependency here): PyO3 needs to unwind panics across the FFI
+# boundary, so we keep the default unwinding panic strategy.
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1

@@ -33,6 +33,4 @@ void TranspositionTable::store(U64 key, int depth, TTFlag flag, double score, Mo
     }
 }
 
-void TranspositionTable::clear() {
-    std::fill(table_.begin(), table_.end(), TTEntry{});
-}
+void TranspositionTable::clear() { std::fill(table_.begin(), table_.end(), TTEntry{}); }

@@ -29,8 +29,7 @@ std::vector<Move> flat_moves(CBoard &board, bool captures_only = false) {
                 if (captures_only) {
                     moves.push_back({from_square, to_square, QUEEN});
                 } else {
-                    for (int promo : PROMO_PIECES)
-                        moves.push_back({from_square, to_square, promo});
+                    for (int promo : PROMO_PIECES) moves.push_back({from_square, to_square, promo});
                 }
             } else {
                 moves.push_back({from_square, to_square, NO_PIECE});
@@ -98,9 +97,7 @@ int Search::order_key(CBoard &board, const Move &move, int ply, const Move &tt_m
     return history_[board.turn][move.from][move.to];
 }
 
-bool Search::time_up() {
-    return has_deadline_ && std::chrono::steady_clock::now() >= deadline_;
-}
+bool Search::time_up() { return has_deadline_ && std::chrono::steady_clock::now() >= deadline_; }
 
 double Search::quiescence(CBoard &board, double alpha, double beta, int qdepth) {
     nodes_ += 1;
@@ -167,9 +164,12 @@ std::pair<double, Move> Search::minimax(CBoard &board, int depth, double alpha, 
     if (tt_entry) {
         tt_move = tt_entry->best_move;
         if (tt_entry->depth >= depth) {
-            if (tt_entry->flag == TTFlag::EXACT) return {tt_entry->score, tt_entry->best_move};
-            else if (tt_entry->flag == TTFlag::LOWER) alpha = std::max(alpha, tt_entry->score);
-            else if (tt_entry->flag == TTFlag::UPPER) beta = std::min(beta, tt_entry->score);
+            if (tt_entry->flag == TTFlag::EXACT)
+                return {tt_entry->score, tt_entry->best_move};
+            else if (tt_entry->flag == TTFlag::LOWER)
+                alpha = std::max(alpha, tt_entry->score);
+            else if (tt_entry->flag == TTFlag::UPPER)
+                beta = std::min(beta, tt_entry->score);
             if (alpha >= beta) return {tt_entry->score, tt_entry->best_move};
         }
     }
@@ -247,8 +247,10 @@ std::pair<double, Move> Search::minimax(CBoard &board, int depth, double alpha, 
     if (record_root) root_info_ = std::move(root_info);
 
     TTFlag flag = TTFlag::EXACT;
-    if (best_eval <= orig_alpha) flag = TTFlag::UPPER;
-    else if (best_eval >= beta) flag = TTFlag::LOWER;
+    if (best_eval <= orig_alpha)
+        flag = TTFlag::UPPER;
+    else if (best_eval >= beta)
+        flag = TTFlag::LOWER;
     tt_.store(key, depth, flag, best_eval, best_move);
 
     return {best_eval, best_move};
@@ -286,12 +288,9 @@ std::vector<Move> Search::extract_pv(CBoard &board, int max_len) {
     return pv;
 }
 
-Move Search::get_best_move(CBoard &board, int depth) {
-    return search_position(board, depth).first;
-}
+Move Search::get_best_move(CBoard &board, int depth) { return search_position(board, depth).first; }
 
-std::pair<Move, double> Search::search_position(CBoard &board, int max_depth,
-                                                double time_limit_ms,
+std::pair<Move, double> Search::search_position(CBoard &board, int max_depth, double time_limit_ms,
                                                 InfoCallback info_callback) {
     for (int p = 0; p < MAX_PLY; ++p) killers_[p][0] = killers_[p][1] = NULL_MOVE;
     age_history();
@@ -346,11 +345,9 @@ std::vector<RootAnalysis> Search::analyze(CBoard &board, int depth) {
 
     bool maximizing = board.turn == WHITE;
     auto ranked = root_info_;
-    std::stable_sort(ranked.begin(), ranked.end(),
-                     [maximizing](const auto &a, const auto &b) {
-                         return maximizing ? std::get<1>(a) > std::get<1>(b)
-                                           : std::get<1>(a) < std::get<1>(b);
-                     });
+    std::stable_sort(ranked.begin(), ranked.end(), [maximizing](const auto &a, const auto &b) {
+        return maximizing ? std::get<1>(a) > std::get<1>(b) : std::get<1>(a) < std::get<1>(b);
+    });
 
     std::vector<RootAnalysis> results;
     for (const auto &r : ranked) {

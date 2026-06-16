@@ -8,6 +8,11 @@ build/
 
 # Rust build artifacts
 /rust/target/
+/rust-ffi/target/
+
+# Native Python extension (built by maturin / cargo)
+*.so
+/wheels/
 
 # Match artifacts
 *.pgn

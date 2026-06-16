@@ -18,3 +18,26 @@ nn = [
 bench = [
     "matplotlib>=3.7",
 ]
+# Native Rust/PyO3 engine + parallel self-play (rust-ffi). 
+ffi = [
+    "eschess-native",
+]
+
+[tool.uv.sources]
+eschess-native = { path = "rust-ffi" }
+
+# Dev tooling (synced by default): test runner + formatter/linter + hook manager.
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.6", "pre-commit>=3"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["python"]
+
+[tool.ruff.lint]
+# E: pycodestyle  F: pyflakes (unused imports / undefined names)  I: isort
+select = ["E", "F", "I"]
+
+[tool.ruff.format]
+quote-style = "double"

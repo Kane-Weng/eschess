@@ -42,7 +42,7 @@ inline int file_of(int square) { return square & 7; }   // square % 8
 inline int rank_of(int square) { return square >> 3; }  // square // 8
 
 // Counts the number of set bits (1s)
-inline int popcount(U64 b) { return __builtin_popcountll(b); }  
+inline int popcount(U64 b) { return __builtin_popcountll(b); }
 
 // Index of the least-significant set bit (square 0..63). Undefined for 0.
 inline int lsb_index(U64 b) { return __builtin_ctzll(b); }
@@ -55,10 +55,10 @@ inline int pop_lsb(U64 &b) {
 }
 
 // ── Wrap-safe directional shifts (compass rose from board.py) ───────────────
-inline U64 shift_n(U64 b)  { return (b << 8) & FULL_BOARD; }
-inline U64 shift_s(U64 b)  { return b >> 8; }
-inline U64 shift_e(U64 b)  { return (b & NOT_FILE_H) << 1; }
-inline U64 shift_w(U64 b)  { return (b & NOT_FILE_A) >> 1; }
+inline U64 shift_n(U64 b) { return (b << 8) & FULL_BOARD; }
+inline U64 shift_s(U64 b) { return b >> 8; }
+inline U64 shift_e(U64 b) { return (b & NOT_FILE_H) << 1; }
+inline U64 shift_w(U64 b) { return (b & NOT_FILE_A) >> 1; }
 inline U64 shift_ne(U64 b) { return ((b & NOT_FILE_H) << 9) & FULL_BOARD; }
 inline U64 shift_nw(U64 b) { return ((b & NOT_FILE_A) << 7) & FULL_BOARD; }
 inline U64 shift_se(U64 b) { return (b & NOT_FILE_H) >> 7; }
@@ -84,9 +84,7 @@ struct Move {
     bool operator==(const Move &o) const {
         return from == o.from && to == o.to && promotion == o.promotion;
     }
-    bool operator!=(const Move &o) const { 
-        return !(*this == o); 
-    }
+    bool operator!=(const Move &o) const { return !(*this == o); }
 };
 
 constexpr Move NULL_MOVE{-1, -1, NO_PIECE};

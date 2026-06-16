@@ -15,10 +15,18 @@ fn legal_move_list(board: &mut CBoard) -> Vec<Move> {
             let to = pop_lsb(&mut bits);
             if board.needs_promotion(from, to) {
                 for &promo in &PROMO_PIECES {
-                    moves.push(Move { from, to, promotion: promo });
+                    moves.push(Move {
+                        from,
+                        to,
+                        promotion: promo,
+                    });
                 }
             } else {
-                moves.push(Move { from, to, promotion: NO_PIECE });
+                moves.push(Move {
+                    from,
+                    to,
+                    promotion: NO_PIECE,
+                });
             }
         }
     }
@@ -47,7 +55,10 @@ fn run(name: &str, fen: &str, expected: &[u64]) {
         let mut b = CBoard::from_fen(fen);
         let got = perft(&mut b, d);
         let status = if got == reference { "OK" } else { "MISMATCH" };
-        println!("  perft({}) = {}  (expected {}) {}", d, got, reference, status);
+        println!(
+            "  perft({}) = {}  (expected {}) {}",
+            d, got, reference, status
+        );
     }
     println!();
 }

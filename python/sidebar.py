@@ -17,18 +17,18 @@ from engine.board import square_name
 Hotspot = namedtuple("Hotspot", "rect action")
 
 # -- Palette ------------------------------------------------------------------
-PANEL_BG     = (24,  24,  28)
-TITLE_COL    = (235, 235, 240)
-TEXT_COL     = (205, 205, 210)
-MUTED_COL    = (140, 140, 148)
-BTN_BG       = (52,  52,  60)
-BTN_SEL_BG   = (66, 120, 200)
-BTN_DIS_BG   = (38,  38,  44)
-BTN_DIS_TXT  = (92,  92,  100)
-TRACK_BG     = (52,  52,  60)
-TRACK_FILL   = (66, 120, 200)
-PAD          = 14
-ROW_H        = 30
+PANEL_BG = (24, 24, 28)
+TITLE_COL = (235, 235, 240)
+TEXT_COL = (205, 205, 210)
+MUTED_COL = (140, 140, 148)
+BTN_BG = (52, 52, 60)
+BTN_SEL_BG = (66, 120, 200)
+BTN_DIS_BG = (38, 38, 44)
+BTN_DIS_TXT = (92, 92, 100)
+TRACK_BG = (52, 52, 60)
+TRACK_FILL = (66, 120, 200)
+PAD = 14
+ROW_H = 30
 
 _FONTS: dict[tuple[str, int, bool], pygame.font.Font] = {}
 
@@ -52,8 +52,7 @@ def _label(screen, text, x, y) -> int:
     return y + 22
 
 
-def _segment(screen, x, y, width, options, current, action_for,
-             enabled, hotspots) -> int:
+def _segment(screen, x, y, width, options, current, action_for, enabled, hotspots) -> int:
     """A row of equal-width buttons; 'enabled' maps option->bool."""
     n = len(options)
     gap = 6
@@ -85,9 +84,12 @@ def _slider(screen, x, y, width, value, lo, hi, hotspots, enabled=True) -> int:
     pygame.draw.rect(screen, TRACK_BG if enabled else BTN_DIS_BG, track, border_radius=4)
     if enabled:
         frac = (value - lo) / (hi - lo) if hi > lo else 0
-        pygame.draw.rect(screen, TRACK_FILL,
-                         (track.x, track.y, int(track.width * frac), track.height),
-                         border_radius=4)
+        pygame.draw.rect(
+            screen,
+            TRACK_FILL,
+            (track.x, track.y, int(track.width * frac), track.height),
+            border_radius=4,
+        )
         handle_x = track.x + int(track.width * frac)
         pygame.draw.circle(screen, (225, 235, 255), (handle_x, track.y + 4), 9)
         hotspots.append(Hotspot(pygame.Rect(x, y, width, 26), ("depth", lo, hi)))
@@ -111,23 +113,63 @@ def draw_engine_settings(screen, x, y, width, pending, avail, dirty) -> int:
     is_ab = pending["search"] == "alphabeta"
 
     y = _label(screen, "Language", x, y)
-    y = _segment(screen, x, y, width, ["py", "cpp", "rust"], pending["lang"],
-                 lambda o: ("set", "lang", o),
-                 {"py": True, "cpp": avail["cpp"], "rust": avail["rust"]}, hotspots)
+    y = _segment(
+        screen,
+        x,
+        y,
+        width,
+        ["py", "cpp", "rust"],
+        pending["lang"],
+        lambda o: ("set", "lang", o),
+        {"py": True, "cpp": avail["cpp"], "rust": avail["rust"]},
+        hotspots,
+    )
 
     y = _label(screen, "Move source" if is_py else "Move source (Python only)", x, y)
-    y = _segment(screen, x, y, width, ["alphabeta", "policy"], pending["search"],
-                 lambda o: ("set", "search", o),
-                 {"alphabeta": is_py, "policy": is_py and avail["policy"]}, hotspots)
+    y = _segment(
+        screen,
+        x,
+        y,
+        width,
+        ["alphabeta", "policy"],
+        pending["search"],
+        lambda o: ("set", "search", o),
+        {"alphabeta": is_py, "policy": is_py and (avail["policy"] or avail["policy_rl"])},
+        hotspots,
+    )
 
     # C++/Rust share the simple/medium/complex tiers; only alpha-beta Python has 'nn'.
     eval_on = (is_py and is_ab) or not is_py
-    nn_on = is_py and is_ab and avail["value"]
+    nn_on = is_py and is_ab and (avail["value"] or avail["value_rl"])
     y = _label(screen, "Evaluation" if eval_on else "Evaluation (alpha-beta only)", x, y)
-    y = _segment(screen, x, y, width, ["simple", "medium", "complex", "nn"],
-                 pending["eval"], lambda o: ("set", "eval", o),
-                 {"simple": eval_on, "medium": eval_on, "complex": eval_on,
-                  "nn": nn_on}, hotspots)
+    y = _segment(
+        screen,
+        x,
+        y,
+        width,
+        ["simple", "medium", "complex", "nn"],
+        pending["eval"],
+        lambda o: ("set", "eval", o),
+        {"simple": eval_on, "medium": eval_on, "complex": eval_on, "nn": nn_on},
+        hotspots,
+    )
+
+    kind = "policy" if pending["search"] == "policy" else "value"
+    net_active = is_py and ((is_ab and pending["eval"] == "nn") or pending["search"] == "policy")
+    sup_on = net_active and avail[kind]
+    rl_on = net_active and avail[f"{kind}_rl"]
+    y = _label(screen, "Weights" if net_active else "Weights (nn eval / policy only)", x, y)
+    y = _segment(
+        screen,
+        x,
+        y,
+        width,
+        ["supervised", "rl"],
+        pending["weights"],
+        lambda o: ("set", "weights", o),
+        {"supervised": sup_on, "rl": rl_on},
+        hotspots,
+    )
 
     hi = 5 if is_py else 8
     depth_on = not (is_py and pending["search"] == "policy")
@@ -178,8 +220,9 @@ def draw_performance(screen, x, y, width, last_info) -> int:
     return y + 6
 
 
-def draw_collapsible_header(screen, x, y, width, title, collapsed, key,
-                            nav=False) -> tuple[list, int]:
+def draw_collapsible_header(
+    screen, x, y, width, title, collapsed, key, nav=False
+) -> tuple[list, int]:
     """A section heading with a ▶/▼ collapse toggle and optional ◀ ▶ nav arrows."""
     hotspots: list[Hotspot] = []
     # Nav buttons come first so they win hit-testing over the full-width row.
@@ -187,12 +230,14 @@ def draw_collapsible_header(screen, x, y, width, title, collapsed, key,
         bw = 26
         right = pygame.Rect(x + width - bw, y, bw, 24)
         left = pygame.Rect(x + width - 2 * bw - 6, y, bw, 24)
-        for rect, facing, action in ((left, "left", ("undo",)),
-                                     (right, "right", ("redo",))):
+        for rect, facing, action in ((left, "left", ("undo",)), (right, "right", ("redo",))):
             pygame.draw.rect(screen, BTN_BG, rect, border_radius=4)
             mx, my = rect.center
-            arrow = ([(mx + 4, my - 6), (mx - 5, my), (mx + 4, my + 6)] if facing == "left"
-                     else [(mx - 4, my - 6), (mx + 5, my), (mx - 4, my + 6)])
+            arrow = (
+                [(mx + 4, my - 6), (mx - 5, my), (mx + 4, my + 6)]
+                if facing == "left"
+                else [(mx - 4, my - 6), (mx + 5, my), (mx - 4, my + 6)]
+            )
             pygame.draw.polygon(screen, TEXT_COL, arrow)
             hotspots.append(Hotspot(rect, action))
 
@@ -225,7 +270,7 @@ def draw_move_list(screen, rect, move_log, cursor, scroll_from_bottom) -> int:
     max_scroll = max(0, len(pairs) - rows)
     scroll = max(0, min(scroll_from_bottom, max_scroll))
     start = max(0, len(pairs) - rows - scroll)
-    visible = pairs[start:start + rows]
+    visible = pairs[start : start + rows]
 
     cy = rect.y + 6
     for num, w, b, wi, bi in visible:
@@ -244,7 +289,7 @@ def draw_move_list(screen, rect, move_log, cursor, scroll_from_bottom) -> int:
 def draw_extras_menu(screen, anchor_rect, toggles) -> list[Hotspot]:
     """Dropdown checklist under the gear; returns its hotspots (incl. a backdrop)."""
     items = [
-        ("eval_bar",  "Eval bar"),
+        ("eval_bar", "Eval bar"),
         ("last_move", "Last-move highlight"),
     ]
     hotspots: list[Hotspot] = []
@@ -278,6 +323,7 @@ def draw_gear(screen, rect, open_) -> Hotspot:
     pygame.draw.circle(screen, (225, 230, 240), (cx, cy), 3)
     for k in range(8):
         import math
+
         a = k * math.pi / 4
         x1 = cx + int(9 * math.cos(a))
         y1 = cy + int(9 * math.sin(a))

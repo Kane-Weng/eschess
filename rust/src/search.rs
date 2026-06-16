@@ -170,7 +170,13 @@ impl Search {
         matches!(self.deadline, Some(d) if Instant::now() >= d)
     }
 
-    fn quiescence(&mut self, board: &mut CBoard, mut alpha: f64, mut beta: f64, qdepth: i32) -> f64 {
+    fn quiescence(
+        &mut self,
+        board: &mut CBoard,
+        mut alpha: f64,
+        mut beta: f64,
+        qdepth: i32,
+    ) -> f64 {
         self.nodes += 1;
         if self.deadline.is_some() && (self.nodes & 255) == 0 && self.time_up() {
             self.stop = true;
@@ -215,7 +221,7 @@ impl Search {
                 (v, m)
             })
             .collect();
-        keyed.sort_by(|a, b| b.0.cmp(&a.0));
+        keyed.sort_by_key(|x| std::cmp::Reverse(x.0));
 
         for (_, mv) in keyed {
             board.make_move(mv.from, mv.to, mv.promotion);
@@ -302,7 +308,7 @@ impl Search {
             .into_iter()
             .map(|m| (self.order_key(board, &m, ply, &tt_move), m))
             .collect();
-        keyed.sort_by(|a, b| b.0.cmp(&a.0));
+        keyed.sort_by_key(|x| std::cmp::Reverse(x.0));
 
         let maximizing = board.turn == WHITE;
         let mut have_best = false;
@@ -497,7 +503,12 @@ impl Search {
             let mut pv = self.extract_pv(board, depth); // response chain from TT
             board.unmake_move();
             pv.insert(0, mv);
-            results.push(RootAnalysis { mv, score, node_count, pv });
+            results.push(RootAnalysis {
+                mv,
+                score,
+                node_count,
+                pv,
+            });
         }
         results
     }

@@ -5,10 +5,11 @@ Author: Kane Weng
 Chess board backend: representation, move generation, validation, game state.
 """
 
-from enum import IntEnum, auto
+import random as _random
 from collections.abc import Iterator
 from dataclasses import dataclass
-import random as _random
+from enum import IntEnum, auto
+
 
 class Square(IntEnum):
     """
@@ -24,14 +25,72 @@ class Square(IntEnum):
     - light squares      0x55AA55AA55AA55AA
     - dark squares       0xAA55AA55AA55AA55
     """
-    A1 = 0;      B1 = auto(); C1 = auto(); D1 = auto(); E1 = auto(); F1 = auto(); G1 = auto(); H1 = auto()
-    A2 = auto(); B2 = auto(); C2 = auto(); D2 = auto(); E2 = auto(); F2 = auto(); G2 = auto(); H2 = auto()
-    A3 = auto(); B3 = auto(); C3 = auto(); D3 = auto(); E3 = auto(); F3 = auto(); G3 = auto(); H3 = auto()
-    A4 = auto(); B4 = auto(); C4 = auto(); D4 = auto(); E4 = auto(); F4 = auto(); G4 = auto(); H4 = auto()
-    A5 = auto(); B5 = auto(); C5 = auto(); D5 = auto(); E5 = auto(); F5 = auto(); G5 = auto(); H5 = auto()
-    A6 = auto(); B6 = auto(); C6 = auto(); D6 = auto(); E6 = auto(); F6 = auto(); G6 = auto(); H6 = auto()
-    A7 = auto(); B7 = auto(); C7 = auto(); D7 = auto(); E7 = auto(); F7 = auto(); G7 = auto(); H7 = auto()
-    A8 = auto(); B8 = auto(); C8 = auto(); D8 = auto(); E8 = auto(); F8 = auto(); G8 = auto(); H8 = auto()
+
+    A1 = 0
+    B1 = auto()
+    C1 = auto()
+    D1 = auto()
+    E1 = auto()
+    F1 = auto()
+    G1 = auto()
+    H1 = auto()
+    A2 = auto()
+    B2 = auto()
+    C2 = auto()
+    D2 = auto()
+    E2 = auto()
+    F2 = auto()
+    G2 = auto()
+    H2 = auto()
+    A3 = auto()
+    B3 = auto()
+    C3 = auto()
+    D3 = auto()
+    E3 = auto()
+    F3 = auto()
+    G3 = auto()
+    H3 = auto()
+    A4 = auto()
+    B4 = auto()
+    C4 = auto()
+    D4 = auto()
+    E4 = auto()
+    F4 = auto()
+    G4 = auto()
+    H4 = auto()
+    A5 = auto()
+    B5 = auto()
+    C5 = auto()
+    D5 = auto()
+    E5 = auto()
+    F5 = auto()
+    G5 = auto()
+    H5 = auto()
+    A6 = auto()
+    B6 = auto()
+    C6 = auto()
+    D6 = auto()
+    E6 = auto()
+    F6 = auto()
+    G6 = auto()
+    H6 = auto()
+    A7 = auto()
+    B7 = auto()
+    C7 = auto()
+    D7 = auto()
+    E7 = auto()
+    F7 = auto()
+    G7 = auto()
+    H7 = auto()
+    A8 = auto()
+    B8 = auto()
+    C8 = auto()
+    D8 = auto()
+    E8 = auto()
+    F8 = auto()
+    G8 = auto()
+    H8 = auto()
+
 
 class Color(IntEnum):
     WHITE = 0
@@ -40,13 +99,15 @@ class Color(IntEnum):
     def opponent(self) -> "Color":
         return Color(1 - self.value)
 
+
 class PieceType(IntEnum):
-    PAWN   = 0
+    PAWN = 0
     KNIGHT = 1
     BISHOP = 2
-    ROOK   = 3
-    QUEEN  = 4
-    KING   = 5
+    ROOK = 3
+    QUEEN = 4
+    KING = 5
+
 
 U64 = int  # Type alias for readability
 
@@ -58,8 +119,12 @@ CR_BQ = 0b0001
 
 # ── FEN piece characters ────────────────────────────────────────────────────
 _PIECE_TO_FEN: dict[PieceType, str] = {
-    PieceType.PAWN: 'p', PieceType.KNIGHT: 'n', PieceType.BISHOP: 'b',
-    PieceType.ROOK: 'r', PieceType.QUEEN: 'q', PieceType.KING: 'k',
+    PieceType.PAWN: "p",
+    PieceType.KNIGHT: "n",
+    PieceType.BISHOP: "b",
+    PieceType.ROOK: "r",
+    PieceType.QUEEN: "q",
+    PieceType.KING: "k",
 }
 _FEN_TO_PIECE: dict[str, PieceType] = {v: k for k, v in _PIECE_TO_FEN.items()}
 
@@ -68,15 +133,15 @@ STARTPOS_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 # ── Board constants ─────────────────────────────────────────────────────────
 FULL_BOARD: U64 = 0xFFFFFFFFFFFFFFFF
 
-FILE_A:  U64 = 0x0101010101010101
-FILE_H:  U64 = 0x8080808080808080
+FILE_A: U64 = 0x0101010101010101
+FILE_H: U64 = 0x8080808080808080
 FILE_AB: U64 = FILE_A | (FILE_A << 1)
-FILE_GH: U64 = FILE_H | (FILE_H >> 1)  
+FILE_GH: U64 = FILE_H | (FILE_H >> 1)
 
-NOT_FILE_A:  U64 = FULL_BOARD ^ FILE_A  
-NOT_FILE_H:  U64 = FULL_BOARD ^ FILE_H 
-NOT_FILE_AB: U64 = FULL_BOARD ^ FILE_AB 
-NOT_FILE_GH: U64 = FULL_BOARD ^ FILE_GH 
+NOT_FILE_A: U64 = FULL_BOARD ^ FILE_A
+NOT_FILE_H: U64 = FULL_BOARD ^ FILE_H
+NOT_FILE_AB: U64 = FULL_BOARD ^ FILE_AB
+NOT_FILE_GH: U64 = FULL_BOARD ^ FILE_GH
 
 RANK_1: U64 = 0x00000000000000FF
 RANK_2: U64 = 0x000000000000FF00
@@ -85,11 +150,13 @@ RANK_8: U64 = 0xFF00000000000000
 
 # ── Square / bits conversion ────────────────────────────────────────────────
 
+
 def square_to_bits(square: int) -> U64:
     """Convert a 0-63 square index to a single-bit U64."""
     if not (0 <= square <= 63):
         raise ValueError(f"Invalid square index: {square}")
     return 1 << square
+
 
 def bits_to_squares(bits: U64) -> Iterator[int]:
     """Yield all square indices set in bits (fast LSB extraction)."""
@@ -98,18 +165,22 @@ def bits_to_squares(bits: U64) -> Iterator[int]:
         yield lsb.bit_length() - 1
         bits &= bits - 1
 
+
 # ── Square / algebraic name conversion (for UCI / FEN) ──────────────────────
 _FILE_CHARS = "abcdefgh"
+
 
 def square_name(square: int) -> str:
     """0-63 square index → algebraic coordinate, e.g. 12 → 'e2'."""
     return f"{_FILE_CHARS[square % 8]}{square // 8 + 1}"
 
+
 def name_to_square(name: str) -> int:
     """Algebraic coordinate → 0-63 square index, e.g. 'e2' → 12."""
-    file_idx = ord(name[0]) - ord('a')
+    file_idx = ord(name[0]) - ord("a")
     rank_idx = int(name[1]) - 1
     return 8 * rank_idx + file_idx
+
 
 # ── Directional shift functions (wrap-safe) ─────────────────────────────────
 """
@@ -121,21 +192,46 @@ def name_to_square(name: str) -> int:
           -9    -8    -7
 ===================================
 """
-def shift_n(bits: U64)  -> U64: return (bits << 8) & FULL_BOARD
-def shift_s(bits: U64)  -> U64: return  bits >> 8
-def shift_e(bits: U64)  -> U64: return (bits & NOT_FILE_H) << 1
-def shift_w(bits: U64)  -> U64: return (bits & NOT_FILE_A) >> 1
-def shift_ne(bits: U64) -> U64: return ((bits & NOT_FILE_H) << 9) & FULL_BOARD
-def shift_nw(bits: U64) -> U64: return ((bits & NOT_FILE_A) << 7) & FULL_BOARD
-def shift_se(bits: U64) -> U64: return  (bits & NOT_FILE_H) >> 7
-def shift_sw(bits: U64) -> U64: return  (bits & NOT_FILE_A) >> 9
+
+
+def shift_n(bits: U64) -> U64:
+    return (bits << 8) & FULL_BOARD
+
+
+def shift_s(bits: U64) -> U64:
+    return bits >> 8
+
+
+def shift_e(bits: U64) -> U64:
+    return (bits & NOT_FILE_H) << 1
+
+
+def shift_w(bits: U64) -> U64:
+    return (bits & NOT_FILE_A) >> 1
+
+
+def shift_ne(bits: U64) -> U64:
+    return ((bits & NOT_FILE_H) << 9) & FULL_BOARD
+
+
+def shift_nw(bits: U64) -> U64:
+    return ((bits & NOT_FILE_A) << 7) & FULL_BOARD
+
+
+def shift_se(bits: U64) -> U64:
+    return (bits & NOT_FILE_H) >> 7
+
+
+def shift_sw(bits: U64) -> U64:
+    return (bits & NOT_FILE_A) >> 9
+
 
 def knight_attacks(bits: U64) -> U64:
     """All squares a knight can reach from any set bit in bits."""
-    l1 = (bits >> 1) & NOT_FILE_H   
-    l2 = (bits >> 2) & NOT_FILE_GH 
-    r1 = (bits << 1) & NOT_FILE_A  
-    r2 = (bits << 2) & NOT_FILE_AB  
+    l1 = (bits >> 1) & NOT_FILE_H
+    l2 = (bits >> 2) & NOT_FILE_GH
+    r1 = (bits << 1) & NOT_FILE_A
+    r2 = (bits << 2) & NOT_FILE_AB
     h1 = l1 | r1
     h2 = l2 | r2
     return ((h1 << 16) | (h1 >> 16) | (h2 << 8) | (h2 >> 8)) & FULL_BOARD
@@ -144,19 +240,23 @@ def knight_attacks(bits: U64) -> U64:
 # ── Zobrist hashing ─────────────────────────────────────────────────────────
 _rng = _random.Random(0xCAFEBABE)  # fixed seed → reproducible keys
 
-def _r64() -> int: return _rng.getrandbits(64)
 
-# Initialization: 
+def _r64() -> int:
+    return _rng.getrandbits(64)
+
+
+# Initialization:
 # - 1  number for each piece at each square
 # - 1  number to indicate the side to move is black
 # - 16 numbers to indicate castling rights
 # - 8  numbers to indicate the file of a valid en-passant square
-_ZOB_PIECE   = [[[_r64() for _ in range(64)] for _ in range(6)] for _ in range(2)]
-_ZOB_TURN    = _r64()
-_ZOB_CASTLE  = [_r64() for _ in range(16)]
-_ZOB_EP      = [_r64() for _ in range(8)]   
+_ZOB_PIECE = [[[_r64() for _ in range(64)] for _ in range(6)] for _ in range(2)]
+_ZOB_TURN = _r64()
+_ZOB_CASTLE = [_r64() for _ in range(16)]
+_ZOB_EP = [_r64() for _ in range(8)]
 
 # ── Move record ─────────────────────────────────────────────────────────────
+
 
 @dataclass
 class Move:
@@ -222,14 +322,14 @@ class CBoard:
     # ── Board init ──────────────────────────────────────────────────────────
 
     def set_pieces(self):
-        self.colors[Color.WHITE]      = 0x000000000000FFFF
-        self.colors[Color.BLACK]      = 0xFFFF000000000000
-        self.pieces[PieceType.PAWN]   = 0x00FF00000000FF00
+        self.colors[Color.WHITE] = 0x000000000000FFFF
+        self.colors[Color.BLACK] = 0xFFFF000000000000
+        self.pieces[PieceType.PAWN] = 0x00FF00000000FF00
         self.pieces[PieceType.KNIGHT] = 0x4200000000000042
         self.pieces[PieceType.BISHOP] = 0x2400000000000024
-        self.pieces[PieceType.ROOK]   = 0x8100000000000081
-        self.pieces[PieceType.QUEEN]  = 0x0800000000000008
-        self.pieces[PieceType.KING]   = 0x1000000000000010
+        self.pieces[PieceType.ROOK] = 0x8100000000000081
+        self.pieces[PieceType.QUEEN] = 0x0800000000000008
+        self.pieces[PieceType.KING] = 0x1000000000000010
 
     # ── FEN serialization ───────────────────────────────────────────────────
 
@@ -251,7 +351,7 @@ class CBoard:
         self.pieces = [0, 0, 0, 0, 0, 0]
         rank_idx, file_idx = 7, 0
         for ch in placement:
-            if ch == '/':
+            if ch == "/":
                 rank_idx -= 1
                 file_idx = 0
             elif ch.isdigit():
@@ -261,14 +361,18 @@ class CBoard:
                 self._set_piece(color, _FEN_TO_PIECE[ch.lower()], 8 * rank_idx + file_idx)
                 file_idx += 1
 
-        self.turn = Color.WHITE if side == 'w' else Color.BLACK
+        self.turn = Color.WHITE if side == "w" else Color.BLACK
         cr = 0
-        if 'K' in castling: cr |= CR_WK
-        if 'Q' in castling: cr |= CR_WQ
-        if 'k' in castling: cr |= CR_BK
-        if 'q' in castling: cr |= CR_BQ
+        if "K" in castling:
+            cr |= CR_WK
+        if "Q" in castling:
+            cr |= CR_WQ
+        if "k" in castling:
+            cr |= CR_BK
+        if "q" in castling:
+            cr |= CR_BQ
         self.castling_rights = cr
-        self.en_passant_square = None if ep == '-' else name_to_square(ep)
+        self.en_passant_square = None if ep == "-" else name_to_square(ep)
         self.halfmove_clock = int(parts[4]) if len(parts) > 4 else 0
         self.fullmove = int(parts[5]) if len(parts) > 5 else 1
 
@@ -297,15 +401,21 @@ class CBoard:
                 row += str(empty)
             rows.append(row)
 
-        side = 'w' if self.turn == Color.WHITE else 'b'
-        cr = "".join(c for bit, c in ((CR_WK, 'K'), (CR_WQ, 'Q'), (CR_BK, 'k'), (CR_BQ, 'q'))
-                     if self.castling_rights & bit) or '-'
-        ep = '-' if self.en_passant_square is None else square_name(self.en_passant_square)
+        side = "w" if self.turn == Color.WHITE else "b"
+        cr = (
+            "".join(
+                c
+                for bit, c in ((CR_WK, "K"), (CR_WQ, "Q"), (CR_BK, "k"), (CR_BQ, "q"))
+                if self.castling_rights & bit
+            )
+            or "-"
+        )
+        ep = "-" if self.en_passant_square is None else square_name(self.en_passant_square)
         return f"{'/'.join(rows)} {side} {cr} {ep} {self.halfmove_clock} {self.fullmove}"
 
     def _compute_zobrist(self) -> int:
         """
-        Gets the Zobrist hash code of a certain position by 
+        Gets the Zobrist hash code of a certain position by
         xoring all random numbers linked to the initial position
         """
         key = 0
@@ -356,7 +466,10 @@ class CBoard:
     # ── Sliding ray helpers ─────────────────────────────────────────────────
 
     def _ray(self, square: int, delta: int, edge_mask: U64, occ: U64, friendly: U64) -> U64:
-        """Walk one ray direction. edge_mask marks squares where the ray must stop before stepping."""
+        """Walk one ray direction.
+
+        edge_mask marks squares where the ray must stop before stepping.
+        """
         result: U64 = 0
         cur = square
         while True:
@@ -374,29 +487,29 @@ class CBoard:
         return result
 
     def _bishop_attacks(self, square: int, occ: U64, friendly: U64) -> U64:
-        result  = self._ray(square,  9, FILE_H | RANK_8, occ, friendly)
-        result |= self._ray(square,  7, FILE_A | RANK_8, occ, friendly)
+        result = self._ray(square, 9, FILE_H | RANK_8, occ, friendly)
+        result |= self._ray(square, 7, FILE_A | RANK_8, occ, friendly)
         result |= self._ray(square, -7, FILE_H | RANK_1, occ, friendly)
         result |= self._ray(square, -9, FILE_A | RANK_1, occ, friendly)
         return result
 
     def _rook_attacks(self, square: int, occ: U64, friendly: U64) -> U64:
-        result  = self._ray(square,  8, RANK_8, occ, friendly)
+        result = self._ray(square, 8, RANK_8, occ, friendly)
         result |= self._ray(square, -8, RANK_1, occ, friendly)
-        result |= self._ray(square,  1, FILE_H, occ, friendly)
+        result |= self._ray(square, 1, FILE_H, occ, friendly)
         result |= self._ray(square, -1, FILE_A, occ, friendly)
         return result
 
     # ── Pseudo-legal move generators ────────────────────────────────────────
 
     def _pawn_pseudo(self, square: int, color: Color) -> U64:
-        occ    = self.occupied()
-        enemy  = self.colors[color.opponent()]
-        bits   = square_to_bits(square)
+        occ = self.occupied()
+        enemy = self.colors[color.opponent()]
+        bits = square_to_bits(square)
         result: U64 = 0
 
         if color == Color.WHITE:
-            push1   = shift_n(bits) & ~occ
+            push1 = shift_n(bits) & ~occ
             result |= push1
             if bits & RANK_2:
                 result |= shift_n(push1) & ~occ  # Double push (blocked if rank 3 is occupied)
@@ -406,7 +519,7 @@ class CBoard:
                 ep_bits = square_to_bits(self.en_passant_square)
                 result |= (shift_nw(bits) | shift_ne(bits)) & ep_bits
         else:
-            push1   = shift_s(bits) & ~occ
+            push1 = shift_s(bits) & ~occ
             result |= push1
             if bits & RANK_7:
                 result |= shift_s(push1) & ~occ
@@ -428,14 +541,24 @@ class CBoard:
         return self._rook_attacks(square, self.occupied(), self.colors[color])
 
     def _queen_pseudo(self, square: int, color: Color) -> U64:
-        occ      = self.occupied()
+        occ = self.occupied()
         friendly = self.colors[color]
-        return self._bishop_attacks(square, occ, friendly) | self._rook_attacks(square, occ, friendly)
+        return self._bishop_attacks(square, occ, friendly) | self._rook_attacks(
+            square, occ, friendly
+        )
 
     def _king_pseudo(self, square: int, color: Color) -> U64:
         bits = square_to_bits(square)
-        attacks = (shift_n(bits)  | shift_s(bits)  | shift_e(bits)  | shift_w(bits) |
-                   shift_ne(bits) | shift_nw(bits) | shift_se(bits) | shift_sw(bits))
+        attacks = (
+            shift_n(bits)
+            | shift_s(bits)
+            | shift_e(bits)
+            | shift_w(bits)
+            | shift_ne(bits)
+            | shift_nw(bits)
+            | shift_se(bits)
+            | shift_sw(bits)
+        )
         return attacks & ~self.colors[color]
 
     def _get_pseudo_legal(self, square: int, color: Color) -> U64:
@@ -443,19 +566,25 @@ class CBoard:
         if info is None or info[0] != color:
             return 0
         piece_type = info[1]
-        if piece_type == PieceType.PAWN:   return self._pawn_pseudo(square, color)
-        if piece_type == PieceType.KNIGHT: return self._knight_pseudo(square, color)
-        if piece_type == PieceType.BISHOP: return self._bishop_pseudo(square, color)
-        if piece_type == PieceType.ROOK:   return self._rook_pseudo(square, color)
-        if piece_type == PieceType.QUEEN:  return self._queen_pseudo(square, color)
-        if piece_type == PieceType.KING:   return self._king_pseudo(square, color)
+        if piece_type == PieceType.PAWN:
+            return self._pawn_pseudo(square, color)
+        if piece_type == PieceType.KNIGHT:
+            return self._knight_pseudo(square, color)
+        if piece_type == PieceType.BISHOP:
+            return self._bishop_pseudo(square, color)
+        if piece_type == PieceType.ROOK:
+            return self._rook_pseudo(square, color)
+        if piece_type == PieceType.QUEEN:
+            return self._queen_pseudo(square, color)
+        if piece_type == PieceType.KING:
+            return self._king_pseudo(square, color)
         return 0
 
     # ── Attack map (for check/castle validation) ────────────────────────────
 
     def get_attacks(self, color: Color) -> U64:
         """All squares attacked by color (used for check and castling safety)."""
-        occ    = self.occupied()
+        occ = self.occupied()
         result: U64 = 0
 
         for square in bits_to_squares(self.get_specific_pieces(color, PieceType.PAWN)):
@@ -479,8 +608,16 @@ class CBoard:
 
         for square in bits_to_squares(self.get_specific_pieces(color, PieceType.KING)):
             bits = square_to_bits(square)
-            result |= (shift_n(bits)  | shift_s(bits)  | shift_e(bits)  | shift_w(bits) |
-                       shift_ne(bits) | shift_nw(bits) | shift_se(bits) | shift_sw(bits))
+            result |= (
+                shift_n(bits)
+                | shift_s(bits)
+                | shift_e(bits)
+                | shift_w(bits)
+                | shift_ne(bits)
+                | shift_nw(bits)
+                | shift_se(bits)
+                | shift_sw(bits)
+            )
 
         return result
 
@@ -496,12 +633,14 @@ class CBoard:
         color, piece_type = piece_info
 
         captured_info = self.get_piece_at(to_square)
-        captured_piece_type  = captured_info[1] if captured_info else None
+        captured_piece_type = captured_info[1] if captured_info else None
         captured_piece_color = captured_info[0] if captured_info else None
 
         move = Move(
-            from_square=from_square, to_square=to_square,
-            captured_piece=captured_piece_type, captured_color=captured_piece_color,
+            from_square=from_square,
+            to_square=to_square,
+            captured_piece=captured_piece_type,
+            captured_color=captured_piece_color,
             promotion=promotion,
             prev_en_passant_square=self.en_passant_square,
             prev_castling_rights=self.castling_rights,
@@ -528,18 +667,18 @@ class CBoard:
         if piece_type == PieceType.KING:
             diff = to_square - from_square
             rook_from = rook_to = None
-            if diff == 2:    # Kingside
+            if diff == 2:  # Kingside
                 rook_from = from_square + 3
-                rook_to   = from_square + 1
-            elif diff == -2: # Queenside
+                rook_to = from_square + 1
+            elif diff == -2:  # Queenside
                 rook_from = from_square - 4
-                rook_to   = from_square - 1
+                rook_to = from_square - 1
             if rook_from is not None:
                 self._clear_piece(color, PieceType.ROOK, rook_from)
                 self._set_piece(color, PieceType.ROOK, rook_to)
-                move.is_castle       = True
+                move.is_castle = True
                 move.castle_rook_from = rook_from
-                move.castle_rook_to   = rook_to
+                move.castle_rook_to = rook_to
 
         # Update en passant target square
         if piece_type == PieceType.PAWN and abs(to_square - from_square) == 16:
@@ -572,11 +711,11 @@ class CBoard:
     def unmake_move(self):
         if not self.move_history:
             return
-        move  = self.move_history.pop()
+        move = self.move_history.pop()
         color = self.turn.opponent()  # color that made the move
         self.turn = color
 
-        to_square   = move.to_square
+        to_square = move.to_square
         from_square = move.from_square
 
         # Restore piece (undoing promotion reverts to pawn)
@@ -604,9 +743,9 @@ class CBoard:
 
         # Restore saved state
         self.en_passant_square = move.prev_en_passant_square
-        self.castling_rights   = move.prev_castling_rights
-        self.halfmove_clock    = move.prev_halfmove_clock
-        self.zobrist_key       = move.prev_zobrist_key
+        self.castling_rights = move.prev_castling_rights
+        self.halfmove_clock = move.prev_halfmove_clock
+        self.zobrist_key = move.prev_zobrist_key
         if color == Color.BLACK:
             self.fullmove -= 1
 
@@ -614,7 +753,7 @@ class CBoard:
 
     def _castling_pseudo(self, color: Color) -> U64:
         """Returns destination squares for legal castling moves."""
-        occ      = self.occupied()
+        occ = self.occupied()
         attacked = self.get_attacks(color.opponent())
         result: U64 = 0
 
@@ -628,9 +767,17 @@ class CBoard:
         else:
             if attacked & square_to_bits(Square.E8):
                 return 0
-            if (self.castling_rights & CR_BK) and not (occ & 0x6000000000000000) and not (attacked & 0x6000000000000000):
+            if (
+                (self.castling_rights & CR_BK)
+                and not (occ & 0x6000000000000000)
+                and not (attacked & 0x6000000000000000)
+            ):
                 result |= square_to_bits(Square.G8)
-            if (self.castling_rights & CR_BQ) and not (occ & 0x0E00000000000000) and not (attacked & 0x0C00000000000000):
+            if (
+                (self.castling_rights & CR_BQ)
+                and not (occ & 0x0E00000000000000)
+                and not (attacked & 0x0C00000000000000)
+            ):
                 result |= square_to_bits(Square.C8)
         return result
 

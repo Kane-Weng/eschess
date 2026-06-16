@@ -1,0 +1,7 @@
+# Google style with a 4-space indent and 100-col limit to match the repo's
+# Python (ruff) and Rust (rustfmt) settings. No AlignConsecutive* — it doubles
+# the reformat diff and creates noisy churn on every future edit.
+BasedOnStyle: Google
+ColumnLimit: 100
+IndentWidth: 4
+SortIncludes: true

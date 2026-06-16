@@ -18,9 +18,9 @@ import threading
 import pygame
 
 WHITE_FILL = (235, 235, 235)
-BLACK_FILL = (28,  28,  32)
-MID_LINE   = (120, 120, 130)
-RIM_COLOR  = (100, 100, 110)
+BLACK_FILL = (28, 28, 32)
+MID_LINE = (120, 120, 130)
+RIM_COLOR = (100, 100, 110)
 
 _EVAL_FONT = None
 
@@ -37,17 +37,14 @@ def draw_eval_bar(screen, rect, score_pawns) -> None:
     pygame.draw.rect(screen, BLACK_FILL, rect)
     if score_pawns is None:
         pygame.draw.rect(screen, (60, 60, 66), rect)
-        pygame.draw.line(screen, MID_LINE, (rect.x, rect.centery),
-                         (rect.right, rect.centery), 1)
-    else: 
+        pygame.draw.line(screen, MID_LINE, (rect.x, rect.centery), (rect.right, rect.centery), 1)
+    else:
         frac = score_to_white_fraction(score_pawns)
         white_h = int(rect.height * frac)
-        pygame.draw.rect(screen, WHITE_FILL,
-                        (rect.x, rect.bottom - white_h, rect.width, white_h))
+        pygame.draw.rect(screen, WHITE_FILL, (rect.x, rect.bottom - white_h, rect.width, white_h))
         # faint midline marks the 50/50 point
-        pygame.draw.line(screen, MID_LINE, (rect.x, rect.centery),
-                        (rect.right, rect.centery), 1)
-        
+        pygame.draw.line(screen, MID_LINE, (rect.x, rect.centery), (rect.right, rect.centery), 1)
+
         if _EVAL_FONT is None:
             pygame.font.init()
             _EVAL_FONT = pygame.font.SysFont("arial", 8, bold=True)
@@ -58,12 +55,12 @@ def draw_eval_bar(screen, rect, score_pawns) -> None:
             score_str = "-M"
         else:
             score_str = f"{score_pawns:+.1f}"
-        
+
         text_color = BLACK_FILL if white_h > 25 else WHITE_FILL
         text_surf = _EVAL_FONT.render(score_str, True, text_color)
         text_rect = text_surf.get_rect(centerx=rect.centerx, bottom=rect.bottom - 4)
         screen.blit(text_surf, text_rect)
-        
+
     pygame.draw.rect(screen, RIM_COLOR, rect, width=4)
 
 
@@ -84,8 +81,13 @@ class StockfishProbe:
         if not self.available:
             return
         self._proc = subprocess.Popen(
-            shlex.split(path), text=True, bufsize=1, shell=False,
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            shlex.split(path),
+            text=True,
+            bufsize=1,
+            shell=False,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
         )
         self._send("uci")
         self._wait_for("uciok")

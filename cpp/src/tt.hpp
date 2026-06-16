@@ -21,13 +21,13 @@ struct TTEntry {
 };
 
 class TranspositionTable {
-public:
+   public:
     explicit TranspositionTable(int size_mb = 32);
     const TTEntry *probe(U64 key) const;
     void store(U64 key, int depth, TTFlag flag, double score, Move best_move);
     void clear();
 
-private:
+   private:
     std::vector<TTEntry> table_;
     std::size_t mask_;
 };

@@ -87,7 +87,12 @@ const KING_EG_PST: [i32; 64] = [
 ];
 
 const PST_MAP: [&[i32; 64]; 6] = [
-    &PAWN_PST, &KNIGHT_PST, &BISHOP_PST, &ROOK_PST, &QUEEN_PST, &KING_MG_PST,
+    &PAWN_PST,
+    &KNIGHT_PST,
+    &BISHOP_PST,
+    &ROOK_PST,
+    &QUEEN_PST,
+    &KING_MG_PST,
 ];
 
 // Passed-pawn rank bonus (centipawns), indexed by advancement 0..7.
@@ -146,6 +151,8 @@ impl BaseEvaluate for SimpleEvaluate {
         let mut score = 0.0;
         for color in 0..2 {
             let sign = if color == WHITE { 1.0 } else { -1.0 };
+            // Index-based loop mirrors the Python/C++ ports (pt is a piece-type id).
+            #[allow(clippy::needless_range_loop)]
             for pt in 0..6 {
                 let mut b = board.get_specific_pieces(color, pt);
                 while b != 0 {

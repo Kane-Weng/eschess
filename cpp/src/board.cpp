@@ -8,19 +8,24 @@
 
 #include "zobrist.hpp"
 
-const char *STARTPOS_FEN =
-    "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+const char *STARTPOS_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
 static const char PIECE_TO_FEN[6] = {'p', 'n', 'b', 'r', 'q', 'k'};
 
 static int fen_to_piece(char c) {
     switch (std::tolower(c)) {
-        case 'p': return PAWN;
-        case 'n': return KNIGHT;
-        case 'b': return BISHOP;
-        case 'r': return ROOK;
-        case 'q': return QUEEN;
-        case 'k': return KING;
+        case 'p':
+            return PAWN;
+        case 'n':
+            return KNIGHT;
+        case 'b':
+            return BISHOP;
+        case 'r':
+            return ROOK;
+        case 'q':
+            return QUEEN;
+        case 'k':
+            return KING;
     }
     return NO_PIECE;
 }
@@ -56,12 +61,12 @@ CBoard::CBoard() {
 void CBoard::set_pieces() {
     colors[WHITE] = 0x000000000000FFFFULL;
     colors[BLACK] = 0xFFFF000000000000ULL;
-    pieces[PAWN]   = 0x00FF00000000FF00ULL;
+    pieces[PAWN] = 0x00FF00000000FF00ULL;
     pieces[KNIGHT] = 0x4200000000000042ULL;
     pieces[BISHOP] = 0x2400000000000024ULL;
-    pieces[ROOK]   = 0x8100000000000081ULL;
-    pieces[QUEEN]  = 0x0800000000000008ULL;
-    pieces[KING]   = 0x1000000000000010ULL;
+    pieces[ROOK] = 0x8100000000000081ULL;
+    pieces[QUEEN] = 0x0800000000000008ULL;
+    pieces[KING] = 0x1000000000000010ULL;
 }
 
 CBoard CBoard::from_fen(const std::string &fen) {
@@ -104,8 +109,10 @@ void CBoard::set_fen(const std::string &fen) {
     en_passant_square = (ep == "-") ? -1 : name_to_square(ep);
 
     int hmc = 0, fm = 1;
-    if (iss >> hmc) { /* halfmove */ }
-    if (iss >> fm) { /* fullmove */ }
+    if (iss >> hmc) { /* halfmove */
+    }
+    if (iss >> fm) { /* fullmove */
+    }
     halfmove_clock = hmc;
     fullmove = fm;
 
@@ -147,8 +154,8 @@ std::string CBoard::to_fen() const {
     if (cr.empty()) cr = "-";
     std::string ep = (en_passant_square < 0) ? "-" : square_name(en_passant_square);
 
-    return rows + " " + side + " " + cr + " " + ep + " " +
-           std::to_string(halfmove_clock) + " " + std::to_string(fullmove);
+    return rows + " " + side + " " + cr + " " + ep + " " + std::to_string(halfmove_clock) + " " +
+           std::to_string(fullmove);
 }
 
 U64 CBoard::compute_zobrist() const {
@@ -175,9 +182,7 @@ Piece CBoard::get_piece_at(int square) const {
     return {-1, NO_PIECE};
 }
 
-int CBoard::king_square(int color) const {
-    return lsb_index(get_specific_pieces(color, KING));
-}
+int CBoard::king_square(int color) const { return lsb_index(get_specific_pieces(color, KING)); }
 
 // ── Sliding rays ────────────────────────────────────────────────────────────
 
@@ -264,8 +269,8 @@ U64 CBoard::queen_pseudo(int square, int color) const {
 
 U64 CBoard::king_pseudo(int square, int color) const {
     U64 bits = square_to_bits(square);
-    U64 attacks = shift_n(bits) | shift_s(bits) | shift_e(bits) | shift_w(bits) |
-                  shift_ne(bits) | shift_nw(bits) | shift_se(bits) | shift_sw(bits);
+    U64 attacks = shift_n(bits) | shift_s(bits) | shift_e(bits) | shift_w(bits) | shift_ne(bits) |
+                  shift_nw(bits) | shift_se(bits) | shift_sw(bits);
     return attacks & ~colors[color];
 }
 
@@ -273,12 +278,18 @@ U64 CBoard::get_pseudo_legal(int square, int color) const {
     Piece info = get_piece_at(square);
     if (info.empty() || info.color != color) return 0;
     switch (info.type) {
-        case PAWN:   return pawn_pseudo(square, color);
-        case KNIGHT: return knight_pseudo(square, color);
-        case BISHOP: return bishop_pseudo(square, color);
-        case ROOK:   return rook_pseudo(square, color);
-        case QUEEN:  return queen_pseudo(square, color);
-        case KING:   return king_pseudo(square, color);
+        case PAWN:
+            return pawn_pseudo(square, color);
+        case KNIGHT:
+            return knight_pseudo(square, color);
+        case BISHOP:
+            return bishop_pseudo(square, color);
+        case ROOK:
+            return rook_pseudo(square, color);
+        case QUEEN:
+            return queen_pseudo(square, color);
+        case KING:
+            return king_pseudo(square, color);
     }
     return 0;
 }
@@ -292,8 +303,10 @@ U64 CBoard::get_attacks(int color) const {
     U64 p = get_specific_pieces(color, PAWN);
     while (p) {
         U64 bits = square_to_bits(pop_lsb(p));
-        if (color == WHITE) result |= shift_nw(bits) | shift_ne(bits);
-        else                result |= shift_sw(bits) | shift_se(bits);
+        if (color == WHITE)
+            result |= shift_nw(bits) | shift_ne(bits);
+        else
+            result |= shift_sw(bits) | shift_se(bits);
     }
     U64 n = get_specific_pieces(color, KNIGHT);
     while (n) result |= knight_attacks(square_to_bits(pop_lsb(n)));
@@ -312,8 +325,8 @@ U64 CBoard::get_attacks(int color) const {
     U64 k = get_specific_pieces(color, KING);
     while (k) {
         U64 bits = square_to_bits(pop_lsb(k));
-        result |= shift_n(bits) | shift_s(bits) | shift_e(bits) | shift_w(bits) |
-                  shift_ne(bits) | shift_nw(bits) | shift_se(bits) | shift_sw(bits);
+        result |= shift_n(bits) | shift_s(bits) | shift_e(bits) | shift_w(bits) | shift_ne(bits) |
+                  shift_nw(bits) | shift_se(bits) | shift_sw(bits);
     }
     return result;
 }
@@ -391,18 +404,24 @@ void CBoard::make_move(int from_square, int to_square, int promotion) {
         castling_rights &= (color == WHITE) ? ~(CR_WK | CR_WQ) : ~(CR_BK | CR_BQ);
     auto rook_right = [](int sq) -> int {
         switch (sq) {
-            case 0: return CR_WQ;
-            case 7: return CR_WK;
-            case 56: return CR_BQ;
-            case 63: return CR_BK;
+            case 0:
+                return CR_WQ;
+            case 7:
+                return CR_WK;
+            case 56:
+                return CR_BQ;
+            case 63:
+                return CR_BK;
         }
         return 0;
     };
     if (piece_type == ROOK) castling_rights &= ~rook_right(from_square);
     if (captured_piece_type == ROOK) castling_rights &= ~rook_right(to_square);
 
-    if (piece_type == PAWN || captured_piece_type != NO_PIECE) halfmove_clock = 0;
-    else halfmove_clock += 1;
+    if (piece_type == PAWN || captured_piece_type != NO_PIECE)
+        halfmove_clock = 0;
+    else
+        halfmove_clock += 1;
 
     move_history.push_back(move);
     if (color == BLACK) fullmove += 1;
@@ -457,9 +476,9 @@ U64 CBoard::castling_pseudo(int color) const {
     if (color == WHITE) {
         if (attacked & square_to_bits(4)) return 0;  // E1, can't castle out of check
         if ((castling_rights & CR_WK) && !(occ & 0x60ULL) && !(attacked & 0x60ULL))
-            result |= square_to_bits(6);   // G1
+            result |= square_to_bits(6);  // G1
         if ((castling_rights & CR_WQ) && !(occ & 0x0EULL) && !(attacked & 0x0CULL))
-            result |= square_to_bits(2);   // C1
+            result |= square_to_bits(2);  // C1
     } else {
         if (attacked & square_to_bits(60)) return 0;  // E8
         if ((castling_rights & CR_BK) && !(occ & 0x6000000000000000ULL) &&
@@ -503,13 +522,9 @@ std::vector<std::pair<int, U64>> CBoard::get_all_legal_moves() {
     return result;
 }
 
-bool CBoard::is_checkmate() {
-    return is_in_check(turn) && get_all_legal_moves().empty();
-}
+bool CBoard::is_checkmate() { return is_in_check(turn) && get_all_legal_moves().empty(); }
 
-bool CBoard::is_stalemate() {
-    return !is_in_check(turn) && get_all_legal_moves().empty();
-}
+bool CBoard::is_stalemate() { return !is_in_check(turn) && get_all_legal_moves().empty(); }
 
 bool CBoard::needs_promotion(int from_square, int to_square) const {
     Piece info = get_piece_at(from_square);

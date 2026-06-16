@@ -1,0 +1,110 @@
+name: Eschess CI Pipeline
+
+# Build every component from scratch on push / PR and prove cross-language parity.
+on:
+  push:
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build-and-test:
+    name: Build & Parity Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 1. System dependencies for the C++ core (CMake + compiler).
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential
+
+      # 2. Rust toolchain: must come before `uv sync`, which compiles rust-ffi.
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            rust
+            rust-ffi
+
+      # 3. uv (manages Python 3.12 and the locked environment).
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      # 4. Build the C++ core + uci/perft binaries.
+      - name: Build C++ components
+        run: |
+          cmake -S cpp -B cpp/build -DCMAKE_BUILD_TYPE=Release
+          cmake --build cpp/build -j
+
+      # 5. Validate move-gen parity. perft prints OK/MISMATCH but always exits 0,
+      #    so fail the step explicitly when any line mismatches.
+      - name: Validate C++ perft
+        run: |
+          if cpp/build/perft | tee perft-cpp.log | grep -q MISMATCH; then
+            echo "::error::C++ perft mismatch — move generation regressed"
+            exit 1
+          fi
+
+      # 6. Build the Rust core + uci/perft binaries (also a compile check).
+      - name: Build Rust core
+        run: cargo build --release --manifest-path rust/Cargo.toml
+
+      - name: Validate Rust perft
+        run: |
+          if cargo run --release --manifest-path rust/Cargo.toml --bin perft \
+              | tee perft-rust.log | grep -q MISMATCH; then
+            echo "::error::Rust perft mismatch — move generation regressed"
+            exit 1
+          fi
+
+      # 7. Compile the eschess_native extension (via maturin) and install the
+      #    locked Python env + pytest dev group.
+      - name: Build FFI & sync Python environment
+        run: uv sync --extra ffi
+
+      # 8. The real cross-language guard: perft, board->planes encoding parity vs
+      #    python/nn/encoding.py, move-gen/FEN/Zobrist parity, self-play determinism.
+      - name: Run parity tests
+        run: uv run --extra ffi pytest tests/
+
+  # Style gate: runs the exact same hooks as local pre-commit, so CI and the
+  # developer machine enforce identical formatting/linting. Parallel to the build.
+  lint:
+    name: Format & Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # rustfmt + clippy components for the local cargo hooks in .pre-commit-config.yaml.
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            rust
+            rust-ffi
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      # Single source of truth: ruff + clang-format (pinned) + cargo fmt/clippy.
+      - name: Run pre-commit hooks
+        run: uvx pre-commit run --all-files --show-diff-on-failure

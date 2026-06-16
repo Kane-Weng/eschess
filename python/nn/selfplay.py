@@ -24,6 +24,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from engine.board import CBoard, Color, PieceType
+
 from .encoding import board_to_planes, move_to_index
 from .mcts import MCTS, select_move, visit_policy
 
@@ -33,9 +34,10 @@ _DRAW_PIECES = (PieceType.PAWN, PieceType.ROOK, PieceType.QUEEN)
 @dataclass
 class SelfPlaySample:
     """One training example produced by self-play."""
-    planes: np.ndarray                       # (INPUT_PLANES, 8, 8) float32
-    policy_target: list[tuple[int, float]]   # sparse (policy_index, probability)
-    value: float                             # game result, White's perspective
+
+    planes: np.ndarray  # (INPUT_PLANES, 8, 8) float32
+    policy_target: list[tuple[int, float]]  # sparse (policy_index, probability)
+    value: float  # game result, White's perspective
 
 
 def _popcount(bits: int) -> int:
@@ -45,8 +47,9 @@ def _popcount(bits: int) -> int:
 def _insufficient_material(board: CBoard) -> bool:
     """True for the obvious draws: bare kings or a lone minor piece."""
     for piece_type in _DRAW_PIECES:
-        if board.get_specific_pieces(Color.WHITE, piece_type) or \
-           board.get_specific_pieces(Color.BLACK, piece_type):
+        if board.get_specific_pieces(Color.WHITE, piece_type) or board.get_specific_pieces(
+            Color.BLACK, piece_type
+        ):
             return False
     minors = 0
     for piece_type in (PieceType.KNIGHT, PieceType.BISHOP):
@@ -59,19 +62,20 @@ def game_outcome(board: CBoard, rep_counts: dict[int, int]) -> float | None:
     """White-perspective result (+1/0/-1), or None while the game continues."""
     if not board.get_all_legal_moves():
         if board.is_in_check(board.turn):
-            return -1.0 if board.turn == Color.WHITE else 1.0   # side to move is mated
-        return 0.0                                              # stalemate
+            return -1.0 if board.turn == Color.WHITE else 1.0  # side to move is mated
+        return 0.0  # stalemate
     if board.halfmove_clock >= 100:
-        return 0.0                                              # fifty-move rule
+        return 0.0  # fifty-move rule
     if rep_counts.get(board.zobrist_key, 0) >= 3:
-        return 0.0                                              # threefold repetition
+        return 0.0  # threefold repetition
     if _insufficient_material(board):
         return 0.0
     return None
 
 
-def play_game(mcts: MCTS, max_moves: int = 200, temp_moves: int = 30,
-              temperature: float = 1.0) -> list[SelfPlaySample]:
+def play_game(
+    mcts: MCTS, max_moves: int = 200, temp_moves: int = 30, temperature: float = 1.0
+) -> list[SelfPlaySample]:
     """Play one self-play game and return its training samples."""
     board = CBoard()
     rep_counts: dict[int, int] = {board.zobrist_key: 1}
@@ -84,7 +88,7 @@ def play_game(mcts: MCTS, max_moves: int = 200, temp_moves: int = 30,
             result = outcome
             break
         if move_num >= max_moves:
-            result = 0.0   # adjudicate an over-long game as a draw
+            result = 0.0  # adjudicate an over-long game as a draw
             break
 
         visit_counts = mcts.run(board, add_noise=True)

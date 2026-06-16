@@ -12,21 +12,21 @@ extern const char *STARTPOS_FEN;
 
 struct Piece {
     int color;
-    int type;   
+    int type;
     bool empty() const { return type == NO_PIECE; }
 };
 
 class CBoard {
-public:
+   public:
     U64 colors[2];
     U64 pieces[6];
     Color turn;
-    int en_passant_square;   // -1 == none
+    int en_passant_square;  // -1 == none
     int castling_rights;
     int halfmove_clock;
     int fullmove;
     bool game_over;
-    int winner;              // Color, or -1 for stalemate / none
+    int winner;  // Color, or -1 for stalemate / none
     U64 zobrist_key;
 
     CBoard();
@@ -59,12 +59,12 @@ public:
     bool is_stalemate();
     bool needs_promotion(int from_square, int to_square) const;
 
-private:
+   private:
     // Undo record stored per move
     struct Undo {
         int from, to;
-        int captured_piece;   // NO_PIECE == none
-        int captured_color;   // -1 == none
+        int captured_piece;  // NO_PIECE == none
+        int captured_color;  // -1 == none
         int promotion;
         bool is_en_passant;
         bool is_castle;

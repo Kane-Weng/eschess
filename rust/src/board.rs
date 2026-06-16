@@ -1,8 +1,8 @@
 //! Chess board: representation, move generation, legality, make/unmake, game
 //! state. 1:1 port of CBoard in python/engine/board.py and cpp/src/board.cpp.
 
-// Import modules; crate is 'abs path starting at the root module' 
-use crate::types::*;    
+// Import modules; crate is 'abs path starting at the root module'
+use crate::types::*;
 use crate::zobrist;
 
 // pub is akin to constexpr (compiled time constants)
@@ -12,14 +12,15 @@ pub const STARTPOS_FEN: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQ
 const PIECE_TO_FEN: [u8; 6] = [b'p', b'n', b'b', b'r', b'q', b'k'];
 
 fn fen_to_piece(c: char) -> usize {
-    match c.to_ascii_lowercase() {  // control flow: switch-statement variant
+    match c.to_ascii_lowercase() {
+        // control flow: switch-statement variant
         'p' => PAWN,
         'n' => KNIGHT,
         'b' => BISHOP,
         'r' => ROOK,
         'q' => QUEEN,
         'k' => KING,
-        _ => unreachable!(),    // default in cpp
+        _ => unreachable!(), // default in cpp
     }
 }
 
@@ -27,7 +28,7 @@ fn square_name(square: i32) -> String {
     let mut s = String::new();
     s.push((b'a' + file_of(square) as u8) as char);
     s.push((b'1' + rank_of(square) as u8) as char);
-    s   // Implicit Returns
+    s // Implicit Returns
 }
 
 fn name_to_square(name: &str) -> i32 {
@@ -43,7 +44,7 @@ pub struct Piece {
     pub color: i32,
     pub ptype: i32,
 }
-impl Piece {    
+impl Piece {
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.ptype == NO_PIECE
@@ -95,7 +96,7 @@ impl CBoard {
             game_over: false,
             winner: -1,
             zobrist_key: 0,
-            move_history: Vec::with_capacity(64),   // similar to vec.reserve(64) in cpp
+            move_history: Vec::with_capacity(64), // similar to vec.reserve(64) in cpp
         };
         b.set_pieces();
         b.zobrist_key = b.compute_zobrist();
@@ -136,7 +137,11 @@ impl CBoard {
             } else if ch.is_ascii_digit() {
                 file_idx += ch as i32 - '0' as i32;
             } else {
-                let color = if ch.is_ascii_uppercase() { WHITE } else { BLACK };
+                let color = if ch.is_ascii_uppercase() {
+                    WHITE
+                } else {
+                    BLACK
+                };
                 self.set_piece(color, fen_to_piece(ch), 8 * rank_idx + file_idx);
                 file_idx += 1;
             }
@@ -302,7 +307,8 @@ impl CBoard {
     fn ray(&self, square: i32, delta: i32, edge_mask: U64, occ: U64, friendly: U64) -> U64 {
         let mut result: U64 = 0;
         let mut cur = square;
-        loop {  // infinite 'while true' loop block
+        loop {
+            // infinite 'while true' loop block
             if square_to_bits(cur) & edge_mask != 0 {
                 break;
             }
@@ -494,7 +500,11 @@ impl CBoard {
         };
 
         if captured_piece_type != NO_PIECE {
-            self.clear_piece(captured_piece_color as usize, captured_piece_type as usize, to_square);
+            self.clear_piece(
+                captured_piece_color as usize,
+                captured_piece_type as usize,
+                to_square,
+            );
         }
 
         if piece_type == PAWN && self.en_passant_square == to_square {
@@ -600,7 +610,11 @@ impl CBoard {
         self.set_piece(color, original_piece_type, from_square);
 
         if mv.captured_piece != NO_PIECE && !mv.is_en_passant {
-            self.set_piece(mv.captured_color as usize, mv.captured_piece as usize, to_square);
+            self.set_piece(
+                mv.captured_color as usize,
+                mv.captured_piece as usize,
+                to_square,
+            );
         }
 
         if mv.is_en_passant {
