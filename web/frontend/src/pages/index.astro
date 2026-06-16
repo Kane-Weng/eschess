@@ -1,0 +1,41 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import ModuleAccordion from "../components/ModuleAccordion.svelte";
+import BackgroundScene from "../components/scene/BackgroundScene.svelte";
+---
+
+<!-- Landing Page -->
+<BaseLayout
+  title="Eschess"
+  description="A cross-language chess engine, made visible: bitboards, alpha-beta, neural networks, and an LLM coach."
+>
+  <!-- Cinematic auto-playing 3D chess background (non-interactive). -->
+  <BackgroundScene client:only="svelte" />
+
+  <main class="relative z-10 mx-auto flex min-h-screen max-w-3xl flex-col px-6">
+    <!-- Minimal Hero -->
+    <header class="flex flex-col items-center pt-28 pb-16 text-center">
+      <span class="mb-6 text-6xl text-[var(--color-accent)]" aria-hidden="true">♟</span>
+      <h1
+        class="font-[var(--font-display)] text-6xl font-bold tracking-tight sm:text-7xl"
+      >
+        Eschess
+      </h1>
+      <p class="mt-4 text-lg text-slate-400">see how engine thinks</p>
+      <p class="mt-6 max-w-xl text-balance text-sm leading-relaxed text-slate-500">
+        A chess engine built across Python, C++, and Rust, from raw bitboards and
+        alpha-beta search to neural networks and an LLM coach. Every part is made
+        visible.
+      </p>
+    </header>
+
+    <!-- Four main modules -->
+    <section aria-label="Modules" class="pb-28">
+      <ModuleAccordion client:load />
+    </section>
+
+    <footer class="mt-auto border-t border-white/5 py-8 text-center text-xs text-slate-600">
+      Eschess — an engineering showcase.
+    </footer>
+  </main>
+</BaseLayout>

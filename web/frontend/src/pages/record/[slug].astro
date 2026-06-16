@@ -1,0 +1,90 @@
+---
+import { getCollection, render } from "astro:content";
+import BaseLayout from "../../layouts/BaseLayout.astro";
+
+export async function getStaticPaths() {
+  const chapters = (await getCollection("record")).sort(
+    (a, b) => a.data.order - b.data.order,
+  );
+  return chapters.map((entry, i) => ({
+    params: { slug: entry.id },
+    props: {
+      entry,
+      prev: chapters[i - 1] ?? null,
+      next: chapters[i + 1] ?? null,
+    },
+  }));
+}
+
+const { entry, prev, next } = Astro.props;
+const { Content } = await render(entry);
+---
+
+<BaseLayout
+  title={`${entry.data.pieceName} — ${entry.data.title} | Eschess`}
+  description={entry.data.summary}
+>
+  <main class="mx-auto max-w-3xl px-6 pb-28">
+    <nav class="pt-10 text-sm">
+      <a href="/record" class="text-slate-500 hover:text-slate-300">
+        &larr; The Detailed Record
+      </a>
+    </nav>
+
+    <header class="border-b border-white/5 pt-10 pb-8">
+      <div class="flex items-center gap-5">
+        <span class="text-6xl leading-none text-[var(--color-accent)]" aria-hidden="true">
+          {entry.data.piece}
+        </span>
+        <div>
+          <p class="text-xs uppercase tracking-widest text-slate-500">
+            Chapter {entry.data.order} — {entry.data.pieceName}
+          </p>
+          <h1
+            class="mt-1 font-[var(--font-display)] text-3xl font-bold tracking-tight sm:text-4xl"
+          >
+            {entry.data.title}
+          </h1>
+          <p class="mt-1 text-sm italic text-slate-400">{entry.data.theme}</p>
+        </div>
+      </div>
+    </header>
+
+    <article
+      class="prose prose-invert mt-10 max-w-none prose-headings:font-[var(--font-display)] prose-a:text-[var(--color-accent)] prose-strong:text-slate-100 prose-blockquote:border-[var(--color-accent)]/40 prose-blockquote:text-slate-400 prose-code:rounded prose-code:bg-white/10 prose-code:px-1.5 prose-code:py-0.5 prose-code:font-normal prose-code:text-[var(--color-accent)] prose-code:before:content-none prose-code:after:content-none"
+    >
+      <Content />
+    </article>
+
+    <nav class="mt-16 flex justify-between gap-4 border-t border-white/5 pt-8 text-sm">
+      {
+        prev ? (
+          <a href={`/record/${prev.id}`} class="group max-w-[45%] text-left">
+            <span class="block text-xs uppercase tracking-widest text-slate-500">
+              Previous
+            </span>
+            <span class="text-slate-300 group-hover:text-[var(--color-accent)]">
+              {prev.data.piece} {prev.data.pieceName}
+            </span>
+          </a>
+        ) : (
+          <span />
+        )
+      }
+      {
+        next ? (
+          <a href={`/record/${next.id}`} class="group max-w-[45%] text-right">
+            <span class="block text-xs uppercase tracking-widest text-slate-500">
+              Next
+            </span>
+            <span class="text-slate-300 group-hover:text-[var(--color-accent)]">
+              {next.data.pieceName} {next.data.piece}
+            </span>
+          </a>
+        ) : (
+          <span />
+        )
+      }
+    </nav>
+  </main>
+</BaseLayout>

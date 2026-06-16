@@ -1,0 +1,48 @@
+---
+// Expandable concept card for the Detailed Record.
+// The summary is a one-line concept; expanding it reveals the real engine code
+// pulled straight from the repo, syntax-highlighted at build time by Shiki.
+import { Code } from "astro:components";
+
+interface Props {
+  concept: string;
+  summary: string;
+  code: string;
+  lang?: string;
+  source?: string;
+}
+
+const { concept, summary, code, lang = "python", source } = Astro.props;
+---
+
+<details
+  class="not-prose group my-2.5 overflow-hidden rounded-lg border border-white/10 bg-slate-900/40"
+>
+  <summary
+    class="flex cursor-pointer list-none items-start gap-3 px-4 py-3 transition-colors [&::-webkit-details-marker]:hidden hover:bg-white/[0.03]"
+  >
+    <span
+      class="mt-0.5 shrink-0 text-[var(--color-accent)] transition-transform duration-200 group-open:rotate-90"
+      aria-hidden="true">&#9656;</span
+    >
+    <span class="min-w-0">
+      <span class="font-semibold text-slate-100">{concept}</span>
+      <span class="mt-0.5 block text-sm leading-relaxed text-slate-400">{summary}</span>
+    </span>
+  </summary>
+
+  <div class="border-t border-white/10 bg-slate-950/40">
+    {
+      source && (
+        <p class="px-4 pt-3 font-mono text-[0.7rem] tracking-tight text-slate-500">
+          {source}
+        </p>
+      )
+    }
+    <div
+      class="px-2 pb-3 pt-1 text-[0.8rem] [&_pre]:!bg-transparent [&_pre]:overflow-x-auto [&_pre]:p-3"
+    >
+      <Code code={code} lang={lang} theme="github-dark" />
+    </div>
+  </div>
+</details>

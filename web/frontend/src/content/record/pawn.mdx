@@ -1,0 +1,132 @@
+---
+order: 1
+piece: "♟"
+pieceName: "Pawn"
+title: "The Foundation"
+theme: "Small steps that build the frontline."
+summary: "From naive square arrays to 64-bit bitboards, and the search that sits on top: Minimax, alpha-beta, iterative deepening, and transposition tables."
+draft: false
+---
+
+import BitboardExplorer from "../../components/BitboardExplorer.svelte";
+import AlphaBetaTree from "../../components/AlphaBetaTree.svelte";
+import CodeReveal from "../../components/CodeReveal.astro";
+
+export const alphaBetaCode = `maximizing = board.turn == Color.WHITE
+best_eval, best_move = None, None
+
+for move in legal_moves:
+    from_square, to_square, promotion = move
+    board.make_move(from_square, to_square, promotion)
+    eval_score, _ = self.minimax(board, depth - 1, alpha, beta, ply + 1)
+    board.unmake_move()
+
+    if maximizing:
+        if best_eval is None or eval_score > best_eval:
+            best_eval, best_move = eval_score, move
+        alpha = max(alpha, best_eval)   # White raises the floor
+    else:
+        if best_eval is None or eval_score < best_eval:
+            best_eval, best_move = eval_score, move
+        beta = min(beta, best_eval)     # Black lowers the ceiling
+
+    if beta <= alpha:
+        break   # window closed: nothing in this branch can change the result`;
+
+export const iterativeDeepeningCode = `for d in range(1, max(1, max_depth) + 1):
+    score, move = self.minimax(board, d)
+    if self._stop:                       # ran out of time mid-pass
+        if not completed_any and move is not None:
+            best_move = move
+        break
+    if move is not None:
+        best_move, best_score = move, score
+        completed_any = True
+    if abs(best_score) > 8_000:          # forced mate found, search no deeper
+        break
+    if budget is not None and (time.time() - start) >= budget * 0.5:
+        break                            # not enough time left for a deeper pass`;
+
+export const transpositionCode = `# Before searching, ask the table if we have already seen this position.
+key = board.zobrist_key
+tt_entry = self._tt.probe(key)
+if tt_entry is not None and tt_entry.depth >= depth:
+    if tt_entry.flag == TTFlag.EXACT:
+        return tt_entry.score, tt_entry.best_move   # reuse the cached result
+    elif tt_entry.flag == TTFlag.LOWER:
+        alpha = max(alpha, tt_entry.score)
+    elif tt_entry.flag == TTFlag.UPPER:
+        beta = min(beta, tt_entry.score)
+    if alpha >= beta:
+        return tt_entry.score, tt_entry.best_move
+
+# ... and after searching, cache what we found, keyed by the Zobrist hash.
+self._tt.store(key, depth, flag, best_eval, best_move)`;
+
+The pawn is where every game, and every engine, begins. It moves one step at a
+time, but those small steps build the whole frontline. This chapter covers the
+foundation Eschess is built on: how the board is represented, and how the engine
+searches for a move.
+
+## From squares to bits
+
+The obvious way to store a chess position is an array of 64 squares, each holding a
+piece. It works, but it's slow: asking "where can this pawn move?" means looping over
+squares and branching on every one.
+
+The faster idea is a **bitboard**: a single 64-bit integer where each bit is one
+square, `1` for occupied and `0` for empty. One integer per piece type per color. Now a
+question like "advance every white pawn one rank" isn't a loop at all; it's a single
+left-shift by 8.
+
+<BitboardExplorer client:visible />
+
+Try it: load the white pawns and hit **push north**. The entire rank moves forward in
+one operation. This is the whole appeal of bitboards! By mapping the board's geometry onto
+bitwise arithmetic, move generation becomes shifts, masks, and ANDs that the CPU
+runs in a handful of cycles.
+
+In the code, **Little-Endian Rank-File (LERF)** mapping is used. `square index = rank * 8 + file`, 
+so `a1` is bit 0 and `h8` is bit 63. Directions become fixed shifts, like north `<< 8`, south
+`>> 8`, east `<< 1`, with file masks to stop pieces wrapping around the board edge.
+
+## Searching the tree
+
+A representation only matters because of what runs on top of it: the search. Eschess
+starts from **Minimax**, an algorithm that assumes both sides play their best move,
+scores the leaves, and backs the values up the tree. Three ideas make that fast enough
+to play real chess. Expand each one to see how it looks in the engine's own Python.
+
+<CodeReveal
+  concept="Alpha-beta pruning"
+  summary="Skips branches that cannot change the result, often cutting the tree to its square root."
+  source="python/engine/search.py · Search.minimax"
+  code={alphaBetaCode}
+/>
+
+<CodeReveal
+  concept="Iterative deepening"
+  summary="Searches depth 1, then 2, then 3, so a move is always ready when time runs out and earlier results order the next pass."
+  source="python/engine/search.py · Search.search_position"
+  code={iterativeDeepeningCode}
+/>
+
+<CodeReveal
+  concept="Transposition tables"
+  summary="Cache positions by Zobrist hash, so the same position reached by different move orders is searched only once."
+  source="python/engine/search.py + transposition.py"
+  code={transpositionCode}
+/>
+
+Pruning is the idea worth seeing in motion. The tree below is a tiny search: the root
+wants to maximize, the layer below wants to minimize, and the leaves are fixed scores.
+Step through it and watch the `[α, β]` window tighten until whole branches become
+unreachable and fade out, never searched at all.
+
+<AlphaBetaTree client:visible />
+
+Both runs return the same root score. Alpha-beta just refuses to look at moves that
+cannot matter, which is what lets the same time budget reach a deeper search.
+
+Together, these turn a brute-force tree into something that searches deeply enough to
+play real chess. It's still the solid frontline the rest of the engine advances behind.

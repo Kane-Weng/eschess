@@ -1,0 +1,79 @@
+---
+// Tabbed view of the same routine implemented in Python, C++, and Rust.
+// Each panel is highlighted at build time by Shiki; a small inline script
+// switches tabs on the client. Used in the Knight chapter to show that the
+// three engines share one logic, written three times.
+import { Code } from "astro:components";
+
+interface Props {
+  python: string;
+  cpp: string;
+  rust: string;
+  source?: string;
+}
+
+const { python, cpp, rust, source } = Astro.props;
+
+const tabs = [
+  { key: "py", label: "Python", lang: "python", code: python },
+  { key: "cpp", label: "C++", lang: "cpp", code: cpp },
+  { key: "rs", label: "Rust", lang: "rust", code: rust },
+];
+---
+
+<div
+  class="not-prose my-6 overflow-hidden rounded-xl border border-white/10 bg-slate-900/50"
+  data-langtabs
+>
+  <div class="flex items-center gap-1 border-b border-white/10 px-2 pt-2">
+    {
+      tabs.map((t, i) => (
+        <button
+          type="button"
+          data-tab={t.key}
+          class:list={[
+            "rounded-t-md px-3 py-1.5 text-xs font-medium transition-colors",
+            i === 0
+              ? "bg-white/10 text-[var(--color-accent)]"
+              : "text-slate-400 hover:text-slate-200",
+          ]}
+        >
+          {t.label}
+        </button>
+      ))
+    }
+    {source && <span class="ml-auto pr-2 font-mono text-[0.7rem] text-slate-500">{source}</span>}
+  </div>
+
+  <div class="[&_pre]:!bg-transparent [&_pre]:overflow-x-auto [&_pre]:p-4 text-[0.8rem]">
+    {
+      tabs.map((t, i) => (
+        <div data-panel={t.key} style={i === 0 ? "" : "display:none"}>
+          <Code code={t.code} lang={t.lang} theme="github-dark" />
+        </div>
+      ))
+    }
+  </div>
+</div>
+
+<script>
+  // One handler covers every LangTabs instance on the page.
+  document.querySelectorAll<HTMLElement>("[data-langtabs]").forEach((root) => {
+    const tabs = root.querySelectorAll<HTMLElement>("[data-tab]");
+    const panels = root.querySelectorAll<HTMLElement>("[data-panel]");
+    tabs.forEach((tab) => {
+      tab.addEventListener("click", () => {
+        const key = tab.getAttribute("data-tab");
+        tabs.forEach((t) => {
+          const on = t === tab;
+          t.classList.toggle("bg-white/10", on);
+          t.classList.toggle("text-[var(--color-accent)]", on);
+          t.classList.toggle("text-slate-400", !on);
+        });
+        panels.forEach((p) => {
+          p.style.display = p.getAttribute("data-panel") === key ? "" : "none";
+        });
+      });
+    });
+  });
+</script>

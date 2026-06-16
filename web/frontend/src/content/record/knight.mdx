@@ -1,0 +1,200 @@
+---
+order: 2
+piece: "♞"
+pieceName: "Knight"
+title: "The Leap"
+theme: "Jumping across boundaries."
+summary: "The same engine logic written three times in Python, C++, and Rust, kept byte-for-byte equivalent and bound together with zero-cost FFI: prototype in Python, run on native nodes-per-second."
+draft: false
+---
+
+import LangTabs from "../../components/LangTabs.astro";
+import NpsComparison from "../../components/NpsComparison.svelte";
+import CodeReveal from "../../components/CodeReveal.astro";
+
+export const historyPython = `def _update_history(self, color, from_square, to_square, depth):
+    # Gravity formula: pull the score toward the bonus without overflow.
+    bonus = min(depth * depth, _MAX_HISTORY)
+    clamped = max(-_MAX_HISTORY, min(_MAX_HISTORY, bonus))
+    cur = self._history[color][from_square][to_square]
+    self._history[color][from_square][to_square] += (
+        clamped - cur * abs(clamped) // _MAX_HISTORY
+    )`;
+
+export const historyCpp = `void Search::update_history(int color, int from_square, int to_square, int depth) {
+    int bonus = std::min(depth * depth, MAX_HISTORY);
+    int clamped = std::max(-MAX_HISTORY, std::min(MAX_HISTORY, bonus));
+    int cur = history_[color][from_square][to_square];
+    // floordiv() reproduces Python's // ; C++ integer division truncates.
+    history_[color][from_square][to_square] +=
+        clamped - floordiv(static_cast<long>(cur) * std::abs(clamped), MAX_HISTORY);
+}`;
+
+export const historyRust = `fn update_history(&mut self, color: usize, from_square: i32, to_square: i32, depth: i32) {
+    let bonus = (depth * depth).min(MAX_HISTORY);
+    let clamped = bonus.clamp(-MAX_HISTORY, MAX_HISTORY);
+    let idx = hist_idx(color, from_square, to_square);
+    let cur = self.history[idx];
+    // floordiv() reproduces Python's // ; Rust integer division truncates.
+    self.history[idx] += clamped - floordiv(cur as i64 * clamped.abs() as i64, MAX_HISTORY);
+}`;
+
+export const ffiBinding = `#[pyclass(module = "eschess_native")]
+pub struct PyBoard {
+    pub(crate) inner: CBoard,   // the exact core the Rust UCI binary uses
+}
+
+#[pymethods]
+impl PyBoard {
+    #[new]
+    #[pyo3(signature = (fen=None))]
+    fn new(fen: Option<&str>) -> PyBoard {
+        let inner = match fen {
+            Some(f) => CBoard::from_fen(f),
+            None => CBoard::from_fen(STARTPOS_FEN),
+        };
+        PyBoard { inner }
+    }
+
+    // Python calls this directly; no serialization, no subprocess.
+    #[pyo3(signature = (from_square, to_square, promotion=NO_PIECE))]
+    fn make_move(&mut self, from_square: i32, to_square: i32, promotion: i32) {
+        self.inner.make_move(from_square, to_square, promotion);
+    }
+}`;
+
+export const ffiFallback = `try:
+    import eschess_native as _native
+    HAS_NATIVE = True
+except ImportError:        # extension not built; callers fall back to Python
+    _native = None
+    HAS_NATIVE = False`;
+
+export const parityTest = `def test_movegen_fen_parity():
+    rng = random.Random(0)
+    for _ in range(60):
+        nb, cb = en.PyBoard(), CBoard()        # native vs pure-Python
+        for _ in range(60):
+            assert nb.to_fen() == cb.to_fen()
+            keys = sorted(tuple(k) for k in nb.legal_move_keys())
+            assert keys == _py_move_keys(cb), cb.to_fen()
+            if not keys:
+                break
+            f, t = rng.choice(keys)
+            cb.make_move(f, t, None)
+            nb.make_move(f, t, -1)`;
+
+The knight is the only piece that jumps. This chapter is about jumping across
+*language* boundaries: the same search and evaluation logic, implemented three times,
+in Python, C++, and Rust, then stitched back together so one program can use whichever
+one it needs.
+
+## Why three languages
+
+Python is the language of thought. It is quick to prototype and easy to reshape, which is
+exactly what you want while an engine's ideas are still changing every day. But it is slow
+where it hurts most: the move generator, the evaluator, and the transposition table run
+millions of times per search, and a pure-Python search manages only around a thousand
+nodes per second.
+
+The fix is not to abandon Python. It is to keep the experimentation in Python and rewrite
+only the hot loops in a language built for them. C++ and Rust each get a full, line-for-line
+port of the Python core, and the project binds back to whichever one it needs.
+
+## The same function, three times
+
+If three engines are going to stand in for each other, their logic has to match exactly,
+down to the last rounding decision. Here is one small piece of the move-ordering code, the
+history heuristic's update, in all three languages. Switch between the tabs: the shape is
+identical on purpose.
+
+<LangTabs
+  python={historyPython}
+  cpp={historyCpp}
+  rust={historyRust}
+  source="engine/search.py · cpp/src/search.cpp · rust/src/search.rs"
+/>
+
+The interesting detail is the comment. Python's `//` operator is *floor* division: it
+rounds toward negative infinity. C++ and Rust integer division truncates toward zero
+instead, so `-7 // 2` is `-4` in Python but `-3` in the other two. For most inputs that
+never shows, but the history score can go negative, and a single off-by-one there changes
+move ordering, which changes which branches get pruned, which changes the final move. So
+the ports carry an explicit `floordiv()` helper. The same care covers using floating-point
+evaluation instead of integer centipawns, and a **stable** sort for move ordering so equal
+keys keep their original order in every language.
+
+## Proving they're identical
+
+Matching code by eye is not proof. The engines are checked two ways. First, **perft**: count
+the exact number of legal positions reachable to a given depth from a set of known FENs, and
+confirm all three produce the reference numbers from the Chess Programming Wiki. Second, a
+**byte-identical search**: run a fixed-depth search and compare the scores, node counts, and
+principal variation across the three. They have to agree to the digit.
+
+For the native build there is a third check that runs in the test suite: play thousands of
+random positions through both the native board and the pure-Python `CBoard` in lockstep and
+assert they never diverge, promotions included.
+
+<CodeReveal
+  concept="Lockstep parity test"
+  summary="Walk random games through the native and Python boards together and assert their FEN and legal moves match at every ply."
+  source="tests/test_native_parity.py"
+  code={parityTest}
+/>
+
+## Two ways to cross the boundary
+
+Once the engines agree, Python needs a way to actually call them. There are two, and the
+project uses both.
+
+The first is the **UCI protocol**. Each of C++ and Rust compiles to a standalone engine
+binary that speaks the same text protocol a desktop chess GUI would. Python launches it as
+a subprocess and talks over stdin and stdout: write a position, write `go depth 3`, read back
+`bestmove`. It is simple, language-agnostic, and how the benchmarking harness pits engines
+against each other.
+
+<CodeReveal
+  concept="Driving an engine over UCI"
+  summary="Send the position and a go command down stdin, then read info and bestmove lines back off stdout."
+  source="python/engine_backend.py · UCIBackend.get_best_move"
+  code={`def get_best_move(self, board, depth=3):
+    self._send(f"position fen {board.to_fen()}")
+    self._send(f"go depth {depth}")
+    for raw in self._proc.stdout:
+        line = raw.strip()
+        if line.startswith("bestmove"):
+            token = line.split()[1]
+            return None if token == "0000" else _uci_to_move(token)
+    raise RuntimeError("engine closed before 'bestmove'")`}
+/>
+
+The second is **FFI**, a foreign function interface. The Rust core is compiled into a Python
+extension module (`eschess_native`, built with PyO3 and maturin) that Python imports like any
+other package. There is no subprocess and no text protocol: a Python method call lands
+directly on a Rust function. This is the path the machine-learning loop uses, because it runs
+the whole self-play search in Rust and only calls back into Python for batched neural-network
+inference.
+
+<LangTabs
+  python={ffiFallback}
+  cpp={"// C++ exposes itself through the UCI binary above\n// rather than a Python extension module."}
+  rust={ffiBinding}
+  source="python/nn/native.py · rust-ffi/src/board.rs"
+/>
+
+The `try / except ImportError` is the whole graceful-degradation story: if the native
+extension was never built, `HAS_NATIVE` is `False` and every caller silently falls back to
+the pure-Python path. The fast road is optional; the engine still runs without it.
+
+## What the leap buys
+
+All of that machinery exists for one number: nodes per second. The search is the same, the
+position is the same, the move ordering is the same. Only the language underneath changes.
+
+<NpsComparison client:visible />
+
+That gap is why the leap is worth making. Prototype an idea in Python where it is cheap to
+get wrong, prove the C++ and Rust ports reproduce it to the byte, and then run the real
+workload, benchmarking and self-play, at native speed. The knight clears the boundary the
+other pieces cannot.

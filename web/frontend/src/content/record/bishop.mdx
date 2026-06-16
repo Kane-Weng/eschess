@@ -1,0 +1,25 @@
+---
+order: 4
+piece: "♝"
+pieceName: "Bishop"
+title: "The Long Diagonal"
+theme: "Seeing the board differently."
+summary: "From handcrafted piece-square tables to deep networks — an AlphaZero-style pipeline where a policy net predicts moves, a value net judges positions, and MCTS ties them together."
+draft: true
+---
+
+The bishop sees the board along the diagonals — a different geometry from everything
+else. This chapter is about teaching the engine to see positions differently too:
+moving from handcrafted evaluation to learned evaluation.
+
+## Learning to evaluate
+
+It transitions from static **piece-square tables** to deep **convolutional / ResNet**
+networks: a **policy network** that predicts promising moves and a **value network**
+that scores positions. Those nets guide a **Monte Carlo Tree Search**, trained in an
+**AlphaZero-style** self-play reinforcement-learning loop.
+
+> *Coming soon:* a board heatmap projecting where the network's attention is focused
+> before it commits to a move.
+
+This chapter is still being written.

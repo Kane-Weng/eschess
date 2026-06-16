@@ -19,7 +19,8 @@ build/
 /harness/results/
 
 # Internal roadmap notes
-/TASKS.md
+TASKS.md
+TODO.md
 
 # Local secrets (Hugging Face token, etc.)
 .env
