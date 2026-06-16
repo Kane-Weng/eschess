@@ -59,6 +59,11 @@
   function toggle(i: number) {
     locked = locked === i ? null : i;
   }
+
+  function resolveHref(href: string) {
+    if (href.startsWith('#')) return href; 
+    return `${import.meta.env.BASE_URL}${href}`;
+  }
 </script>
 
 <div class="flex flex-col gap-3">
@@ -104,7 +109,7 @@
           <div class="px-6 pb-6 pl-[4.75rem]">
             <p class="max-w-2xl text-sm leading-relaxed text-slate-300">{m.summary}</p>
             <a
-              href={m.href}
+              href={resolveHref(m.href)}
               class="mt-4 inline-flex items-center gap-2 text-sm font-medium text-[var(--color-accent)] hover:underline"
             >
               Open module <span aria-hidden="true">&rarr;</span>

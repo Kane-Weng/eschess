@@ -18,6 +18,11 @@ export async function getStaticPaths() {
 
 const { entry, prev, next } = Astro.props;
 const { Content } = await render(entry);
+
+const resolveHref = (href: string) => {
+  if (href.startsWith('#')) return href;
+  return `${import.meta.env.BASE_URL}${href}`;
+};
 ---
 
 <BaseLayout
@@ -26,7 +31,7 @@ const { Content } = await render(entry);
 >
   <main class="mx-auto max-w-3xl px-6 pb-28">
     <nav class="pt-10 text-sm">
-      <a href="/record" class="text-slate-500 hover:text-slate-300">
+      <a href={resolveHref("/record")} class="text-slate-500 hover:text-slate-300">
         &larr; The Detailed Record
       </a>
     </nav>
@@ -59,7 +64,7 @@ const { Content } = await render(entry);
     <nav class="mt-16 flex justify-between gap-4 border-t border-white/5 pt-8 text-sm">
       {
         prev ? (
-          <a href={`/record/${prev.id}`} class="group max-w-[45%] text-left">
+          <a href={resolveHref(`/record/${prev.id}`)} class="group max-w-[45%] text-left">
             <span class="block text-xs uppercase tracking-widest text-slate-500">
               Previous
             </span>
@@ -73,7 +78,7 @@ const { Content } = await render(entry);
       }
       {
         next ? (
-          <a href={`/record/${next.id}`} class="group max-w-[45%] text-right">
+          <a href={resolveHref(`/record/${next.id}`)} class="group max-w-[45%] text-right">
             <span class="block text-xs uppercase tracking-widest text-slate-500">
               Next
             </span>

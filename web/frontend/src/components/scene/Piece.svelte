@@ -31,7 +31,7 @@
   const nodeName = $derived(`${COLOR[color]}_${TYPE[type]}`);
   const isKnight = $derived(type === "n");
 
-  const gltf = useGltf("/chess_pieces.glb");
+  const gltf = useGltf(`${import.meta.env.BASE_URL}/chess_pieces.glb`);
 
   const SLIDE_MS = 1050; // travel time between squares
   const JUMP_H = 0.95; // knight hop height
