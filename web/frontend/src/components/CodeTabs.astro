@@ -1,0 +1,88 @@
+---
+// Tabbed view of multiple concept+code pairs.
+// Collapses a sequence of CodeReveal-style blocks into a compact tab strip,
+// keeping the summary visible and the code one click away.
+import { Code } from "astro:components";
+
+interface TabItem {
+  concept: string;
+  summary: string;
+  code: string;
+  lang?: string;
+  source?: string;
+}
+
+interface Props {
+  items: TabItem[];
+}
+
+const { items } = Astro.props;
+---
+
+<div
+  class="not-prose my-6 overflow-hidden rounded-xl border border-white/10 bg-slate-900/50"
+  data-codetabs
+>
+  <!-- Tab strip -->
+  <div class="flex flex-wrap items-center gap-1 border-b border-white/10 px-2 pt-2">
+    {
+      items.map((item, i) => (
+        <button
+          type="button"
+          data-tab={i}
+          class:list={[
+            "rounded-t-md px-3 py-1.5 text-xs font-medium transition-colors",
+            i === 0
+              ? "bg-white/10 text-[var(--color-accent)]"
+              : "text-slate-400 hover:text-slate-200",
+          ]}
+        >
+          {item.concept}
+        </button>
+      ))
+    }
+  </div>
+
+  <!-- Panels -->
+  {
+    items.map((item, i) => (
+      <div data-panel={i} style={i === 0 ? "" : "display:none"}>
+        <div class="px-4 pt-3 pb-2">
+          <p class="font-semibold text-slate-100">{item.concept}</p>
+          <p class="mt-0.5 text-sm leading-relaxed text-slate-400">{item.summary}</p>
+          {item.source && (
+            <p class="mt-1 font-mono text-[0.7rem] tracking-tight text-slate-500">
+              {item.source}
+            </p>
+          )}
+        </div>
+        <div class="border-t border-white/10 bg-slate-950/40">
+          <div class="px-2 pb-3 pt-1 text-[0.8rem] [&_pre]:!bg-transparent [&_pre]:overflow-x-auto [&_pre]:p-3">
+            <Code code={item.code} lang={item.lang ?? "python"} theme="github-dark" />
+          </div>
+        </div>
+      </div>
+    ))
+  }
+</div>
+
+<script>
+  document.querySelectorAll<HTMLElement>("[data-codetabs]").forEach((root) => {
+    const tabs = root.querySelectorAll<HTMLButtonElement>("[data-tab]");
+    const panels = root.querySelectorAll<HTMLElement>("[data-panel]");
+    tabs.forEach((tab) => {
+      tab.addEventListener("click", () => {
+        const key = tab.getAttribute("data-tab");
+        tabs.forEach((t) => {
+          const on = t === tab;
+          t.classList.toggle("bg-white/10", on);
+          t.classList.toggle("text-[var(--color-accent)]", on);
+          t.classList.toggle("text-slate-400", !on);
+        });
+        panels.forEach((p) => {
+          p.style.display = p.getAttribute("data-panel") === key ? "" : "none";
+        });
+      });
+    });
+  });
+</script>

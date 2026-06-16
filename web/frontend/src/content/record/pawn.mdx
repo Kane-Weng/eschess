@@ -1,6 +1,6 @@
 ---
 order: 1
-piece: "♟"
+piece: "♟︎"
 pieceName: "Pawn"
 title: "The Foundation"
 theme: "Small steps that build the frontline."
@@ -11,6 +11,101 @@ draft: false
 import BitboardExplorer from "../../components/BitboardExplorer.svelte";
 import AlphaBetaTree from "../../components/AlphaBetaTree.svelte";
 import CodeReveal from "../../components/CodeReveal.astro";
+import CodeTabs from "../../components/CodeTabs.astro";
+import ZobristExplorer from "../../components/ZobristExplorer.svelte";
+
+export const pawnMoveCode = `def _pawn_pseudo(self, square: int, color: Color) -> U64:
+    occ = self.occupied()
+    enemy = self.colors[color.opponent()]
+    bits = square_to_bits(square)
+    result: U64 = 0
+
+    if color == Color.WHITE:
+        push1 = shift_n(bits) & ~occ
+        result |= push1
+        if bits & RANK_2:
+            result |= shift_n(push1) & ~occ  # Double push
+        result |= shift_nw(bits) & enemy
+        result |= shift_ne(bits) & enemy
+        if self.en_passant_square is not None:
+            ep_bits = square_to_bits(self.en_passant_square)
+            result |= (shift_nw(bits) | shift_ne(bits)) & ep_bits
+    # ... (Black logic mirrors this southward) ...
+    return result`;
+
+export const knightMoveCode = `def knight_attacks(bits: U64) -> U64:
+    """All squares a knight can reach from any set bit in bits."""
+    l1 = (bits >> 1) & NOT_FILE_H
+    l2 = (bits >> 2) & NOT_FILE_GH
+    r1 = (bits << 1) & NOT_FILE_A
+    r2 = (bits << 2) & NOT_FILE_AB
+    h1 = l1 | r1
+    h2 = l2 | r2
+    return ((h1 << 16) | (h1 >> 16) | (h2 << 8) | (h2 >> 8)) & FULL_BOARD
+    
+def _knight_pseudo(self, square: int, color: Color) -> U64:
+    return knight_attacks(square_to_bits(square)) & ~self.colors[color]`;
+
+export const bishopMoveCode = `def _bishop_attacks(self, square: int, occ: U64, friendly: U64) -> U64:
+    result = self._ray(square, 9, FILE_H | RANK_8, occ, friendly)
+    result |= self._ray(square, 7, FILE_A | RANK_8, occ, friendly)
+    result |= self._ray(square, -7, FILE_H | RANK_1, occ, friendly)
+    result |= self._ray(square, -9, FILE_A | RANK_1, occ, friendly)
+    return result
+
+def _bishop_pseudo(self, square: int, color: Color) -> U64:
+    return self._bishop_attacks(square, self.occupied(), self.colors[color])`;
+
+export const rookMoveCode = `def _rook_attacks(self, square: int, occ: U64, friendly: U64) -> U64:
+    result = self._ray(square, 8, RANK_8, occ, friendly)
+    result |= self._ray(square, -8, RANK_1, occ, friendly)
+    result |= self._ray(square, 1, FILE_H, occ, friendly)
+    result |= self._ray(square, -1, FILE_A, occ, friendly)
+    return result
+
+def _rook_pseudo(self, square: int, color: Color) -> U64:
+    return self._rook_attacks(square, self.occupied(), self.colors[color])`;
+
+export const queenMoveCode = `def _queen_pseudo(self, square: int, color: Color) -> U64:
+    occ = self.occupied()
+    friendly = self.colors[color]
+    return self._bishop_attacks(square, occ, friendly) | self._rook_attacks(
+        square, occ, friendly
+    )`;
+
+export const kingMoveCode = `def _king_pseudo(self, square: int, color: Color) -> U64:
+    bits = square_to_bits(square)
+    attacks = (
+        shift_n(bits) | shift_s(bits) | shift_e(bits) | shift_w(bits) |
+        shift_ne(bits) | shift_nw(bits) | shift_se(bits) | shift_sw(bits)
+    )
+    return attacks & ~self.colors[color]`;
+
+export const attackCode = `def get_attacks(self, color: Color) -> U64:
+    """All squares attacked by color (used for check and castling safety)."""
+    occ = self.occupied()
+    result: U64 = 0
+    
+    # ... iterates through all pieces ...
+    for square in bits_to_squares(self.get_specific_pieces(color, PieceType.BISHOP)):
+        # Note: 'friendly' mask is 0, so rays piece through their own ranks for threat calculation
+        result |= self._bishop_attacks(square, occ, 0) 
+        
+    return result`;
+
+export const inCheckCode = `def is_in_check(self, color: Color) -> bool:
+    king_square = self._king_square(color)
+    return bool(self.get_attacks(color.opponent()) & square_to_bits(king_square))`;
+
+export const legalMoveCode = `def get_legal_moves(self, square: int) -> U64:
+    # ... get pseudo moves + castling pseudo ...
+    legal: U64 = 0
+    for dest in bits_to_squares(pseudo):
+        self.make_move(square, dest)
+        if not self.is_in_check(color):
+            legal |= square_to_bits(dest)
+        self.unmake_move()
+    return legal`;
 
 export const alphaBetaCode = `maximizing = board.turn == Color.WHITE
 best_eval, best_move = None, None
@@ -68,16 +163,16 @@ time, but those small steps build the whole frontline. This chapter covers the
 foundation Eschess is built on: how the board is represented, and how the engine
 searches for a move.
 
-## From squares to bits
+## From squares to bits: BitBoard
 
 The obvious way to store a chess position is an array of 64 squares, each holding a
 piece. It works, but it's slow: asking "where can this pawn move?" means looping over
 squares and branching on every one.
 
 The faster idea is a **bitboard**: a single 64-bit integer where each bit is one
-square, `1` for occupied and `0` for empty. One integer per piece type per color. Now a
-question like "advance every white pawn one rank" isn't a loop at all; it's a single
-left-shift by 8.
+square, `1` for occupied and `0` for empty. One can store a 64-bit bitboard per piece type 
+per color (so in total 12 bitboards in the system). Now a question like "advance every 
+white pawn one rank" isn't a loop at all; it's a single left-shift by 8.
 
 <BitboardExplorer client:visible />
 
@@ -90,32 +185,149 @@ In the code, **Little-Endian Rank-File (LERF)** mapping is used. `square index =
 so `a1` is bit 0 and `h8` is bit 63. Directions become fixed shifts, like north `<< 8`, south
 `>> 8`, east `<< 1`, with file masks to stop pieces wrapping around the board edge.
 
-## Searching the tree
+## Building the rules: Moves, Attacks, Checks
 
-A representation only matters because of what runs on top of it: the search. Eschess
-starts from **Minimax**, an algorithm that assumes both sides play their best move,
+A bitboard is just a static map of bits. To play chess, the engine needs to translate the physical 
+geometry of the board into bitwise operations. This begins with move generation.
+
+At the lowest level, Eschess calculates **pseudo-legal moves**. These are moves a piece can 
+technically make based on its movement rules, assuming we completely ignore whether the move leaves 
+our own King in check. Here is how the engine computes the pseudo-legal movement rules for all six 
+pieces:
+
+<CodeTabs
+  items={[
+    {
+      concept: "Pawn Moves",
+      summary: "Pieces that move differently than they capture, shifting strictly forward while attacking diagonally.",
+      source: "python/engine/board.py · CBoard._pawn_pseudo",
+      code: pawnMoveCode,
+    },
+    {
+      concept: "Knight Moves",
+      summary: "Leapers that completely ignore board occupancy, striking in fixed L-shaped patterns.",
+      source: "python/engine/board.py · CBoard._knight_pseudo",
+      code: knightMoveCode,
+    },
+    {
+      concept: "Bishop Moves",
+      summary: "Sliding pieces that cast continuous diagonal rays until they hit an edge or another piece.",
+      source: "python/engine/board.py · CBoard._bishop_pseudo",
+      code: bishopMoveCode,
+    },
+    {
+      concept: "Rook Moves",
+      summary: "Sliding pieces that cast continuous orthogonal rays across ranks and files until blocked.",
+      source: "python/engine/board.py · CBoard._rook_pseudo",
+      code: rookMoveCode,
+    },
+    {
+      concept: "Queen Moves",
+      summary: "A composite sliding piece, merging the continuous attack rays of both the bishop and the rook.",
+      source: "python/engine/board.py · CBoard._queen_pseudo",
+      code: queenMoveCode,
+    },
+    {
+      concept: "King Moves",
+      summary: "A fixed-step piece capable of moving exactly one square in any of the eight compass directions.",
+      source: "python/engine/board.py · CBoard._king_pseudo",
+      code: kingMoveCode,
+    },
+  ]}
+/>
+
+While `_get_pseudo_legal` dictates movement, `get_attacks` dictates threat. These are not always 
+identical: pawns push forward but strike diagonally, and sliding pieces project threat along rays 
+even if blocked by their own color.
+
+<CodeReveal
+  concept="Building the Attack Map"
+  summary="Iterates through all pieces to create a unified 64-bit mask of every square currently under threat by the opponent."
+  source="python/engine/board.py · CBoard.get_attacks"
+  code={attackCode}
+/>
+
+With the Attack Map built, finding out if a player's King is in check is computationally trivial, simply through 
+using a bitwise AND (`&`) on bit representing the King's square & the opponent's Attack Map. But, a chess engine cannot 
+just play pseudo-legal moves; it must play strictly legal moves that won't leave one's own King in check.
+
+To filter the list, Eschess uses the `make / unmake` pattern: it temporarily plays a move, checks if its own 
+King is safe, and immediately undoes it.
+
+<CodeReveal
+  concept="Make / Unmake Pattern"
+  summary="Tests every pseudo-legal move by playing it, checking the King's safety, and reverting the board state."
+  source="python/engine/board.py · CBoard.get_legal_moves"
+  code={legalMoveCode}
+/>
+
+
+## Compressing the state: Zobrist Hashing
+
+Representing the board efficiently is only half the battle; the search algorithm needs a way to 
+identify identical positions instantly. If the engine arrives at the exact same board state through 
+two different move orders (a **transposition**), theoretically it shouldn't waste time searching it 
+twice.
+
+To do this, a **Zobrist key** can help flatten the entire 12-layered bitboard configuration into 
+a single, highly uniform 64-bit integer. By the use of the bitwise XOR (`^`), it achieve $O(1)$ 
+incremental updates. Moving a piece becomes a sequence of incredibly cheap bit toggles:
+
+1. **XOR out** the piece from its departure square (erasing its signature).
+2. **XOR in** the piece to its arrival square (baking in its new position).
+3. **XOR the turn flag** to flip the side to move.
+
+<ZobristExplorer client:visible />
+
+From the simple explorer, one can also observe that if a sequence of moves transposes into a known 
+layout, XOR ensure the resulting keys match exactly, regardless of the **order** the moves were 
+played. This single 64-bit key is the primary passport used to query the transposition table 
+during search.
+
+## Evaluating the state: Material and Position
+
+The final stage before searching is to define what is a "good move". In its classical form, 
+Eschess evaluates a board by focusing on:
+
+1. **Who has more stuff?** (Material). A Queen is worth 900 points, a Rook 500, a Pawn 100. 
+The engine sums up the pieces on the board.
+2. **Who has better placement?** (Position/Structure). A knight in the center of the board 
+is vastly superior to a knight stuck in the corner. 
+
+
+This simple math of `Material + Piece-Square bonuses` spits out a single integer. Positive 
+means White is winning, negative means Black is winning.
+
+> More details are explained in Chapter 4: Bishop.
+
+## Searching the tree: Minimax
+
+With the tools and rules built, we can begin the journey of searching the "best move". 
+Eschess starts from **Minimax**, an algorithm that assumes both sides play their best move,
 scores the leaves, and backs the values up the tree. Three ideas make that fast enough
 to play real chess. Expand each one to see how it looks in the engine's own Python.
 
-<CodeReveal
-  concept="Alpha-beta pruning"
-  summary="Skips branches that cannot change the result, often cutting the tree to its square root."
-  source="python/engine/search.py · Search.minimax"
-  code={alphaBetaCode}
-/>
-
-<CodeReveal
-  concept="Iterative deepening"
-  summary="Searches depth 1, then 2, then 3, so a move is always ready when time runs out and earlier results order the next pass."
-  source="python/engine/search.py · Search.search_position"
-  code={iterativeDeepeningCode}
-/>
-
-<CodeReveal
-  concept="Transposition tables"
-  summary="Cache positions by Zobrist hash, so the same position reached by different move orders is searched only once."
-  source="python/engine/search.py + transposition.py"
-  code={transpositionCode}
+<CodeTabs
+  items={[
+    {
+      concept: "Alpha-beta pruning",
+      summary: "Skips branches that cannot change the result, often cutting the tree to its square root.",
+      source: "python/engine/search.py · Search.minimax",
+      code: alphaBetaCode,
+    },
+    {
+      concept: "Iterative deepening",
+      summary: "Searches depth 1, then 2, then 3, so a move is always ready when time runs out and earlier results order the next pass.",
+      source: "python/engine/search.py · Search.search_position",
+      code: iterativeDeepeningCode,
+    },
+    {
+      concept: "Transposition tables",
+      summary: "Cache positions by Zobrist hash, so the same position reached by different move orders is searched only once.",
+      source: "python/engine/search.py + transposition.py",
+      code: transpositionCode,
+    },    
+  ]}
 />
 
 Pruning is the idea worth seeing in motion. The tree below is a tiny search: the root

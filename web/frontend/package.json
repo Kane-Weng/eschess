@@ -18,6 +18,8 @@
     "@threlte/extras": "^9.21.0",
     "astro": "^5.0.0",
     "chess.js": "^1.4.0",
+    "rehype-katex": "^7.0.1",
+    "remark-math": "^6.0.0",
     "svelte": "^5.0.0",
     "tailwindcss": "^4.0.0",
     "three": "^0.184.0"

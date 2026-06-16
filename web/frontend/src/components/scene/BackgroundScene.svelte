@@ -155,7 +155,7 @@
   // down so the board fills the lower frame. The pitch/orientation stays fixed;
   // only the ground position moves. (Moving the position is safe — the old
   // flip/freeze came from retargeting lookAt(), not from moving the eye.)
-  const HOME = { x: 0.5, z: 4.0 }; // home vantage behind e1
+  const HOME = { x: 0.5, z: 4.5 }; // home vantage behind e1
   const EYE_HEIGHT = 1.4;
   const BASE_PITCH = -0.18; // radians; tilt down toward the board
 
