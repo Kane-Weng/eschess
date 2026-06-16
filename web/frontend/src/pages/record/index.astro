@@ -42,7 +42,7 @@ const resolveHref = (href: string) => {
         chapters.map((c) => (
           <li>
             <a
-              href={`/record/${c.id}`}
+              href={resolveHref(`/record/${c.id}`)}
               class="group flex items-center gap-5 rounded-xl border border-white/10 bg-slate-900/60 px-6 py-5 transition-colors hover:border-[var(--color-accent)]/60"
             >
               <span
