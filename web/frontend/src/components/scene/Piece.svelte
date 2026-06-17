@@ -77,7 +77,17 @@
       cloned.traverse((o: any) => {
         o.castShadow = true;
         o.receiveShadow = false;
-        if (o.material) o.material = o.material.clone();
+        if (o.material) {
+          o.material = o.material.clone()
+
+          if (color === "b") {
+            o.material.emissive = new THREE.Color("#222222"); 
+            o.material.emissiveIntensity = 0.8;
+            
+            // Optional: Lower roughness makes it shinier and catch ambient light better
+            o.material.roughness = 0.5; 
+          }
+        };
       });
 
       cloned.updateMatrixWorld(true);

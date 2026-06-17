@@ -66,7 +66,7 @@
   }
 </script>
 
-<div class="flex flex-col gap-3">
+<div class="grid grid-cols-1 items-start gap-4 sm:grid-cols-2">
   {#each modules as m, i (m.title)}
     <div
       class="overflow-hidden rounded-xl border border-white/10 bg-slate-900/70 transition-colors duration-300 hover:border-[var(--color-accent)]/60"
@@ -74,31 +74,35 @@
     >
       <button
         type="button"
-        class="group flex w-full items-center gap-5 px-6 py-5 text-left"
+        class="group flex w-full flex-col items-start gap-4 px-6 py-5 text-left"
         aria-expanded={isOpen(i)}
         onclick={() => toggle(i)}
       >
-        <span
-          class="text-4xl leading-none text-[var(--color-accent)] transition-transform duration-300 group-hover:scale-110 group-focus:scale-110"
-          class:scale-110={isOpen(i)}
-          aria-hidden="true">{m.piece}</span
-        >
-        <span class="flex-1">
-          <span class="flex items-center gap-3">
-            <span class="font-[var(--font-display)] text-xl font-semibold tracking-tight"
-              >{m.title}</span
-            >
-            <span
-              class="rounded-full border border-white/10 px-2 py-0.5 text-[0.65rem] uppercase tracking-wider text-slate-400"
-              >{m.status}</span
-            >
+        <div class="flex w-full items-start justify-between">
+          <span
+            class="text-4xl leading-none text-[var(--color-accent)] transition-transform duration-300 group-hover:scale-110 group-focus:scale-110"
+            class:scale-110={isOpen(i)}
+            aria-hidden="true"
+          >
+            {m.piece}
           </span>
-        </span>
-        <span
-          class="text-2xl text-slate-500 transition-transform duration-300"
-          class:rotate-90={isOpen(i)}
-          aria-hidden="true">&rsaquo;</span
-        >
+          <span
+            class="text-2xl text-slate-500 transition-transform duration-300"
+            class:rotate-90={isOpen(i)}
+            aria-hidden="true"
+          >
+            &rsaquo;
+          </span>
+        </div>
+        
+        <div class="flex flex-col gap-2">
+          <span class="font-[var(--font-display)] text-xl font-semibold tracking-tight">
+            {m.title}
+          </span>
+          <span class="w-fit rounded-full border border-white/10 px-2 py-0.5 text-[0.65rem] uppercase tracking-wider text-slate-400">
+            {m.status}
+          </span>
+        </div>
       </button>
 
       <div
@@ -106,8 +110,8 @@
         style:grid-template-rows={isOpen(i) ? "1fr" : "0fr"}
       >
         <div class="overflow-hidden">
-          <div class="px-6 pb-6 pl-[4.75rem]">
-            <p class="max-w-2xl text-sm leading-relaxed text-slate-300">{m.summary}</p>
+          <div class="px-6 pb-6">
+            <p class="text-sm leading-relaxed text-slate-300">{m.summary}</p>
             <a
               href={resolveHref(m.href)}
               class="mt-4 inline-flex items-center gap-2 text-sm font-medium text-[var(--color-accent)] hover:underline"

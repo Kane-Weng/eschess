@@ -158,6 +158,56 @@ if tt_entry is not None and tt_entry.depth >= depth:
 # ... and after searching, cache what we found, keyed by the Zobrist hash.
 self._tt.store(key, depth, flag, best_eval, best_move)`;
 
+export const orderKeyCode = `# Enforce a strict hierarchy so Alpha-Beta evaluates the strongest moves first.
+if move == tt_move:
+    return 20_000   # 1. Transposition Table best move
+
+from_square, to_square, promotion = move
+if promotion is not None:
+    return 10_000   # 2. Promotions (prioritizing Queens)
+
+captured = board.get_piece_at(to_square)
+if captured is not None:
+    # 3. MVV-LVA: Most Valuable Victim - Least Valuable Aggressor
+    # e.g., Pawn taking a Queen is checked before Queen taking a Pawn
+    aggressor = board.get_piece_at(from_square)
+    agg_val = _CP.get(aggressor[1], 0) if aggressor else 0
+    return 5_000 + _CP.get(captured[1], 0) * 10 - agg_val
+
+# 4. Quiet moves: Killer heuristic (recent cutoffs) then History heuristic
+if self._killers[ply][0] == move: return 4_000
+if self._killers[ply][1] == move: return 3_000
+return self._history[board.turn.value][from_square][to_square]`
+
+export const QuiescenceCode = `# 1. Stand-pat: The static evaluation. We can always choose to "do nothing".
+stand_pat = self._evaluate.evaluate(board)
+maximizing = board.turn == Color.WHITE
+
+# 2. Stand-pat pruning: If doing nothing is enough to cause a cutoff, return immediately.
+if maximizing and stand_pat >= beta:
+    return stand_pat
+elif not maximizing and stand_pat <= alpha:
+    return stand_pat
+
+# 3. The Capture Loop: Only examine "noisy" moves (captures and promotions)
+captures = _flat_moves(board, captures_only=True)
+captures.sort(key=lambda m: _CP.get(board.get_piece_at(m[1])[1], 0), reverse=True)
+
+for move in captures:
+    board.make_move(*move)
+    score = self._quiescence(board, alpha, beta, qdepth + 1)
+    board.unmake_move()
+
+    # 4. Standard Alpha-Beta bounds checking
+    if maximizing and score > alpha:
+        alpha = score
+        if alpha >= beta: return alpha  # beta cutoff
+    elif not maximizing and score < beta:
+        beta = score
+        if beta <= alpha: return beta   # alpha cutoff
+
+return alpha if maximizing else beta`
+
 The pawn is where every game, and every engine, begins. It moves one step at a
 time, but those small steps build the whole frontline. This chapter covers the
 foundation Eschess is built on: how the board is represented, and how the engine
@@ -302,30 +352,46 @@ means White is winning, negative means Black is winning.
 
 ## Searching the tree: Minimax
 
-With the tools and rules built, we can begin the journey of searching the "best move". 
-Eschess starts from **Minimax**, an algorithm that assumes both sides play their best move,
-scores the leaves, and backs the values up the tree. Three ideas make that fast enough
-to play real chess. Expand each one to see how it looks in the engine's own Python.
+With the board mapped and the rules enforced, the engine can finally look ahead. Eschess 
+bases its search on **Minimax**, an algorithm that explores the game tree assuming both 
+players make their absolute best moves, scores the resulting leaves, and backs those 
+values up the tree. 
+
+But a naive Minimax tree grows exponentially, making it far too slow for real-time play. 
+To transform a theoretical algorithm into a competitive engine, we layer on techniques 
+that aggressively prune the tree and prioritize the most promising lines.
 
 <CodeTabs
   items={[
     {
       concept: "Alpha-beta pruning",
-      summary: "Skips branches that cannot change the result, often cutting the tree to its square root.",
+      summary: "Skips branches that cannot change the result, drastically reducing the search space.",
       source: "python/engine/search.py · Search.minimax",
       code: alphaBetaCode,
     },
     {
       concept: "Iterative deepening",
-      summary: "Searches depth 1, then 2, then 3, so a move is always ready when time runs out and earlier results order the next pass.",
+      summary: "Searches depth 1, then 2, then 3. Ensures a move is always ready when time runs out, while using earlier depths to order the next pass.",
       source: "python/engine/search.py · Search.search_position",
       code: iterativeDeepeningCode,
     },
     {
       concept: "Transposition tables",
-      summary: "Cache positions by Zobrist hash, so the same position reached by different move orders is searched only once.",
+      summary: "Caches positions using the Zobrist hash. If the same board state is reached via a different move order, the engine reuses the stored result.",
       source: "python/engine/search.py + transposition.py",
       code: transpositionCode,
+    },
+    {
+      concept: "Move Ordering",
+      summary: "Enforces a strict evaluation hierarchy (TT Move > Captures > Killers) to guarantee Alpha-Beta finds cutoffs as early as possible.",
+      source: "python/engine/search.py · Search._order_key",
+      code: orderKeyCode,
+    },    
+    {
+      concept: "Quiescence search",
+      summary: "When the main search stops, this extends the line strictly for forcing moves (captures) to prevent from misjudging a mid-trade position.",
+      source: "python/engine/search.py · Search._quiescence",
+      code: QuiescenceCode,
     },    
   ]}
 />

@@ -5,11 +5,13 @@ import "katex/dist/katex.min.css";
 interface Props {
   title?: string;
   description?: string;
+  class?: string;
 }
 
 const {
   title = "Eschess",
   description = "A chess engine built to show how it thinks.",
+  class: className = "bg-slate-950",
 } = Astro.props;
 ---
 
@@ -23,7 +25,7 @@ const {
     <meta name="description" content={description} />
     <title>{title}</title>
   </head>
-  <body class="min-h-screen bg-slate-950 text-slate-100 antialiased">
+  <body class=`min-h-screen bg-slate-950 text-slate-100 antialiased ${className}`>
     <slot />
   </body>
 </html>
