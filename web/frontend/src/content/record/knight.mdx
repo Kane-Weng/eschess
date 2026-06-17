@@ -8,6 +8,7 @@ summary: "The same engine logic written three times in Python, C++, and Rust, ke
 draft: false
 ---
 
+import LanguageProfiles from "../../components/LanguageProfiles.svelte";
 import LangTabs from "../../components/LangTabs.astro";
 import NpsComparison from "../../components/NpsComparison.svelte";
 import CodeReveal from "../../components/CodeReveal.astro";
@@ -92,14 +93,19 @@ one it needs.
 ## Why three languages
 
 Python is the language of thought. It is quick to prototype and easy to reshape, which is
-exactly what you want while an engine's ideas are still changing every day. But it is slow
+exactly what you want while an engine's ideas are still changing every day. But it is SLOW
 where it hurts most: the move generator, the evaluator, and the transposition table run
 millions of times per search, and a pure-Python search manages only around a thousand
 nodes per second.
 
-The fix is not to abandon Python. It is to keep the experimentation in Python and rewrite
-only the hot loops in a language built for them. C++ and Rust each get a full, line-for-line
-port of the Python core, and the project binds back to whichever one it needs.
+The fix is not to abandon Python, however. It is to keep the experimentation in Python 
+and rewrite only the hot loops in a language built for them. Eschess treats each language
+as a specialized tool for a specific phase of the engine's lifecycle:
+
+<LanguageProfiles client:visible />
+
+By giving C++ and Rust a full, line-for-line port of the Python core, the project binds 
+back to whichever one it needs for the task at hand.
 
 ## The same function, three times
 
@@ -124,28 +130,9 @@ the ports carry an explicit `floordiv()` helper. The same care covers using floa
 evaluation instead of integer centipawns, and a **stable** sort for move ordering so equal
 keys keep their original order in every language.
 
-## Proving they're identical
-
-Matching code by eye is not proof. The engines are checked two ways. First, **perft**: count
-the exact number of legal positions reachable to a given depth from a set of known FENs, and
-confirm all three produce the reference numbers from the Chess Programming Wiki. Second, a
-**byte-identical search**: run a fixed-depth search and compare the scores, node counts, and
-principal variation across the three. They have to agree to the digit.
-
-For the native build there is a third check that runs in the test suite: play thousands of
-random positions through both the native board and the pure-Python `CBoard` in lockstep and
-assert they never diverge, promotions included.
-
-<CodeReveal
-  concept="Lockstep parity test"
-  summary="Walk random games through the native and Python boards together and assert their FEN and legal moves match at every ply."
-  source="tests/test_native_parity.py"
-  code={parityTest}
-/>
-
 ## Two ways to cross the boundary
 
-Once the engines agree, Python needs a way to actually call them. There are two, and the
+Once the engines are written, Python needs a way to actually call them. There are two, and the
 project uses both.
 
 The first is the **UCI protocol**. Each of C++ and Rust compiles to a standalone engine
@@ -186,6 +173,28 @@ inference.
 The `try / except ImportError` is the whole graceful-degradation story: if the native
 extension was never built, `HAS_NATIVE` is `False` and every caller silently falls back to
 the pure-Python path. The fast road is optional; the engine still runs without it.
+
+## Proving they're identical
+
+Matching code by eye is not proof, and before we trust these native bounds to replace the 
+Python core, the engines must be checked. They are verified in two ways:
+
+1. **perft**: count the exact number of legal positions reachable to a given depth from a 
+set of known FENs, and confirm all three produce the reference numbers from the Chess 
+Programming Wiki. 
+2. **byte-identical search**: run a fixed-depth search and compare the scores, node counts, 
+and principal variation across the three. They have to agree to the digit.
+
+Because the FFI boundary allows direct Python access to the native engine, there is a third 
+check that runs in the test suite: play thousands of random positions through both the `native` 
+board and the pure-Python `CBoard` in lockstep and assert they never diverge, promotions included.
+
+<CodeReveal
+  concept="Lockstep parity test"
+  summary="Walk random games through the native and Python boards together and assert their FEN and legal moves match at every ply."
+  source="tests/test_native_parity.py"
+  code={parityTest}
+/>
 
 ## What the leap buys
 

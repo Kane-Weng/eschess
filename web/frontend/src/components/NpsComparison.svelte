@@ -12,9 +12,9 @@
   }
 
   const ENGINES: Engine[] = [
-    { name: "Python", nps: 1_200, accent: false },
-    { name: "C++", nps: 360_000, accent: false },
-    { name: "Rust", nps: 444_000, accent: true },
+    { name: "Python", nps: 1_824, accent: false },
+    { name: "C++", nps: 518_057, accent: false },
+    { name: "Rust", nps: 589_782, accent: true },
   ];
 
   let secs = $state(1);
@@ -35,7 +35,7 @@
     <p class="text-sm text-slate-300">
       Nodes searched in
       <span class="font-mono text-[var(--color-accent)]">{secs.toFixed(1)}s</span>
-      of equal thinking time
+      of equal thinking time (Depth=5)
     </p>
     <label class="flex items-center gap-2 text-xs text-slate-500">
       think time
