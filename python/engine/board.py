@@ -332,7 +332,7 @@ class CBoard:
         self.pieces[PieceType.KING] = 0x1000000000000010
 
     # ── FEN serialization ───────────────────────────────────────────────────
-    # FEN stands for Forsyth-Edwards Notation: a single-line text format used 
+    # FEN stands for Forsyth-Edwards Notation: a single-line text format used
     # to snapshot the exact state of a chess board at given moment.
     @classmethod
     def from_fen(cls, fen: str) -> "CBoard":

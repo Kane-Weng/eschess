@@ -1,0 +1,72 @@
+---
+order: 0
+piece: "▦"
+pieceName: "Board"
+title: "The Arena"
+theme: "Motivation for the engineering challenges ahead."
+summary: "Why build Eschess from scratch? The core drive to bridge raw numerical search, memory-safe systems programming, and neural networks into one unified architecture."
+draft: false
+---
+
+import PlayerStats from "../../components/PlayerStats.svelte";
+import CourseTimeline from "../../components/CourseTimeline.svelte";
+
+Before a single piece is placed, the 64 squares must be drawn. This chapter covers the
+core motivation for building Eschess from scratch. 
+
+## Chess is Fun! But Also Hard...
+
+I've always been drawn to games of all kinds, whether physical or mental, and chess is one 
+of my favorite hobbies. I started playing in high school simply because one of my favorite 
+characters in a show excelled at it, and I quickly became hooked. What makes the game really 
+intriguing is its endless possibilities. Throughout the thousands of games I've played, every 
+single one has brought a different experience and feeling—whether that be frustration, 
+excitement, or intense focus. 
+
+Lately, my Elo on Chess.com has fluctuated around 1500–1600. Although I didn't have a specific 
+goal rating in mind, I still wanted to improve my skills. The traditional route would be 
+doing more puzzles, watching tutorials on openings and endgame tricks, and reviewing my own 
+games. But the world is evolving, and I realized there might be a cooler way to understand 
+the game: through the power of code.
+
+My stats on Chess.com, if you ever wonder...
+<PlayerStats client:visible />
+
+## Chess Engine: What is that?
+
+This project was initially inspired by a YouTube video about a guy who coded a chess engine. 
+I clicked on it out of pure curiosity, thinking it would just be fun trivia to learn. But as 
+the video went on, I grew more and more interested in the intricate details of chess engine 
+systems, mainly because they relate so strongly to what I study. As a rising junior at the 
+University of Michigan majoring in Robotics and minoring in CS, my interests lie deeply in 
+the software side of autonomy.
+
+So, what did I already know about software and computer architecture? I had learned 
+programming and data structures in C++ (EECS 280), algorithms (EECS 281), logic design 
+(EECS 270), computer architecture (EECS 370), machine learning (EECS 445), and computer 
+vision (EECS 504). Surprisingly, all these technical courses from my sophomore year turned 
+out to be the necessary "pieces" for building a chess engine! 
+
+<CourseTimeline client:visible />
+
+Armed with these tools, I created the Eschess project with a specific goal in mind: "seeing" 
+how an engine thinks. To understand how it analyzes a position, I programmed the backend 
+from scratch to gain full control. I customized visualization elements, like arrows and 
+highlighted squares in Pygame, to show exactly where the engine is looking during its search. 
+
+I want to learn how to analyze a board the way a powerful engine does, which leads to the 
+ultimate question: what makes an engine so strong? Is it pure, crazy brute force? An ML 
+black box? Or just magnificent algorithms?
+
+**The short answer? It’s a beautifully engineered collision of all three.** 
+A powerful engine relies on magnificent algorithms to cleverly prune away bad moves, raw 
+bare-metal brute force to calculate millions of positions per second, and, increasingly, 
+machine learning to provide the "intuition" to evaluate a complex board state. 
+
+That intersection is exactly what Eschess is built to explore. This project isn't just 
+about creating an opponent to play against; it’s my attempt to bridge raw numerical search, 
+systems programming, and neural networks into one unified architecture. By building it from 
+the ground up, the engine becomes an interactive sandbox designed to expose the hidden gears 
+of how a machine thinks, searches, and decides. 
+
+**The 64 squares are drawn, and the arena is set. Let's place the pieces.**

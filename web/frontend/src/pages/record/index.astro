@@ -15,9 +15,10 @@ const resolveHref = (href: string) => {
 <BaseLayout
   title="The Detailed Record — Eschess"
   description="An interactive engineering blog telling the engine's story through the six chess pieces, Pawn to King."
-  class="bg-[var(--color-slate-950)] bg-[linear-gradient(to_right,#22d3ee20_1px,transparent_1px),linear-gradient(to_bottom,#22d3ee40_1px,transparent_1px)] bg-[size:24px_24px]"
 >
-  <main class="mx-auto max-w-3xl px-6 pb-28">
+  <canvas id="blueprint-canvas" class="fixed inset-0 z-0 pointer-events-none"></canvas>
+
+  <main class="relative z-10 mx-auto max-w-3xl px-6 pb-28">
     <nav class="pt-10 text-sm">
       <a href={resolveHref("/")} class="text-slate-500 hover:text-slate-300">&larr; Eschess</a>
     </nav>
@@ -40,14 +41,22 @@ const resolveHref = (href: string) => {
 
     <ol class="flex flex-col gap-3">
       {
-        chapters.map((c) => (
+        chapters.map((c) => {
+          const isPrologue = c.data.order === 0;
+          return (
           <li>
             <a
               href={resolveHref(`/record/${c.id}`)}
-              class="group flex items-center gap-5 rounded-xl border border-white/10 bg-slate-900/60 px-6 py-5 transition-colors hover:border-[var(--color-accent)]/60"
+              class={`group flex items-center gap-5 rounded-xl border px-6 py-5 transition-colors ${
+                isPrologue
+                  ? "border-amber-400/20 bg-amber-950/20 hover:border-amber-400/60"
+                  : "border-white/10 bg-slate-900/60 hover:border-[var(--color-accent)]/60"
+              }`}
             >
               <span
-                class="text-4xl leading-none text-[var(--color-accent)] transition-transform duration-300 group-hover:scale-110"
+                class={`text-4xl leading-none transition-transform duration-300 group-hover:scale-110 ${
+                  isPrologue ? "text-amber-400" : "text-[var(--color-accent)]"
+                }`}
                 aria-hidden="true"
               >
                 {c.data.piece}
@@ -55,8 +64,15 @@ const resolveHref = (href: string) => {
               <span class="min-w-0 flex-1">
                 <span class="flex flex-wrap items-center gap-3">
                   <span class="font-[var(--font-display)] text-lg font-semibold tracking-tight">
-                    {c.data.order}. {c.data.pieceName} — {c.data.title}
+                    {isPrologue
+                      ? `${c.data.pieceName} — ${c.data.title}`
+                      : `${c.data.order}. ${c.data.pieceName} — ${c.data.title}`}
                   </span>
+                  {isPrologue && (
+                    <span class="rounded-full border border-amber-400/30 px-2 py-0.5 text-[0.6rem] uppercase tracking-wider text-amber-400/80">
+                      Prologue
+                    </span>
+                  )}
                   {c.data.draft && (
                     <span class="rounded-full border border-white/10 px-2 py-0.5 text-[0.6rem] uppercase tracking-wider text-slate-500">
                       Draft
@@ -75,8 +91,99 @@ const resolveHref = (href: string) => {
               </span>
             </a>
           </li>
-        ))
+          );
+        })
       }
     </ol>
   </main>
 </BaseLayout>
+
+<script>
+  function initCanvas() {
+    const canvas = document.getElementById("blueprint-canvas") as HTMLCanvasElement;
+    if (!canvas) return;
+    
+    const ctx = canvas.getContext("2d")!;
+    if (!ctx) return;
+
+    // --- CONFIGURATION ---
+    const GRID_SIZE = 24;
+    const LINE_COLOR_V = "rgba(34, 211, 238, 0.04)"; 
+    const LINE_COLOR_H = "rgba(34, 211, 238, 0.08)"; 
+
+    let width = 0;
+    let height = 0;
+    let activeSquares: { x: number; y: number; life: number; maxLife: number }[] = [];
+
+    function resize() {
+      width = window.innerWidth;
+      height = window.innerHeight;
+      canvas.width = width;
+      canvas.height = height;
+    }
+
+    window.addEventListener("resize", resize);
+    resize();
+
+    function animate() {
+      ctx.clearRect(0, 0, width, height);
+
+      if (Math.random() < 0.15) { 
+        const cols = Math.ceil(width / GRID_SIZE);
+        const rows = Math.ceil(height / GRID_SIZE);
+        const x = Math.floor(Math.random() * cols);
+        const y = Math.floor(Math.random() * rows);
+
+        activeSquares.push({
+          x,
+          y,
+          life: 0,
+          maxLife: 100 + Math.random() * 150, 
+        });
+      }
+
+      for (let i = activeSquares.length - 1; i >= 0; i--) {
+        const sq = activeSquares[i];
+        sq.life++;
+
+        if (sq.life >= sq.maxLife) {
+          activeSquares.splice(i, 1);
+          continue;
+        }
+
+        const opacity = Math.sin((sq.life / sq.maxLife) * Math.PI) * 0.15;
+        
+        ctx.fillStyle = `rgba(34, 211, 238, ${opacity})`;
+        ctx.fillRect(
+          sq.x * GRID_SIZE,
+          sq.y * GRID_SIZE,
+          GRID_SIZE,
+          GRID_SIZE
+        );
+      }
+
+      ctx.beginPath();
+      for (let x = 0; x < width; x += GRID_SIZE) {
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, height);
+      }
+      ctx.strokeStyle = LINE_COLOR_V;
+      ctx.stroke();
+
+      ctx.beginPath();
+      for (let y = 0; y < height; y += GRID_SIZE) {
+        ctx.moveTo(0, y);
+        ctx.lineTo(width, y);
+      }
+      ctx.strokeStyle = LINE_COLOR_H;
+      ctx.stroke();
+
+      requestAnimationFrame(animate);
+    }
+
+    animate();
+  }
+
+  initCanvas();
+  document.addEventListener('astro:page-load', initCanvas);
+</script>

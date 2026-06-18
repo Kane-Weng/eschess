@@ -2,13 +2,16 @@
 // Expandable concept card for the Detailed Record.
 // The summary is a one-line concept; expanding it reveals the real engine code
 // pulled straight from the repo, syntax-highlighted at build time by Shiki.
+import type { ComponentProps } from "astro/types";
 import { Code } from "astro:components";
+
+type CodeLang = ComponentProps<typeof Code>["lang"];
 
 interface Props {
   concept: string;
   summary: string;
   code: string;
-  lang?: string;
+  lang?: CodeLang;
   source?: string;
 }
 

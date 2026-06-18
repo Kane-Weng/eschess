@@ -2,13 +2,16 @@
 // Tabbed view of multiple concept+code pairs.
 // Collapses a sequence of CodeReveal-style blocks into a compact tab strip,
 // keeping the summary visible and the code one click away.
+import type { ComponentProps } from "astro/types";
 import { Code } from "astro:components";
+
+type CodeLang = ComponentProps<typeof Code>["lang"];
 
 interface TabItem {
   concept: string;
   summary: string;
   code: string;
-  lang?: string;
+  lang?: CodeLang;
   source?: string;
 }
 

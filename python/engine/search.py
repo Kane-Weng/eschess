@@ -165,7 +165,7 @@ class Search:
         if qdepth >= _QS_DEPTH:  # safety valve against tactical explosions
             return stand_pat
 
-        captures = _flat_moves(board, captures_only=True)   # filters out all quiet moves.
+        captures = _flat_moves(board, captures_only=True)  # filters out all quiet moves.
         # MVV: order by value of captured piece (no LVA needed in QS)
         captures.sort(
             key=lambda m: (

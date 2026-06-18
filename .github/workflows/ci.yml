@@ -108,3 +108,36 @@ jobs:
       # Single source of truth: ruff + clang-format (pinned) + cargo fmt/clippy.
       - name: Run pre-commit hooks
         run: uvx pre-commit run --all-files --show-diff-on-failure
+
+  # Web frontend gate: type-check (astro check) + production build for the
+  # Astro + Svelte site. Independent of the engine jobs, so it runs in parallel.
+  web:
+    name: Web Frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web/frontend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+
+      # Reproducible install from the committed lockfile.
+      - name: Install dependencies
+        run: npm ci
+
+      # Full TypeScript + template diagnostics across .astro/.svelte/.ts.
+      - name: Type-check
+        run: npm run check
+
+      # Prove the site compiles and bundles (catches broken imports,
+      # invalid components, and content-collection schema violations).
+      - name: Build
+        run: npm run build
