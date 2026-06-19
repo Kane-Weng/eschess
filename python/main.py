@@ -52,9 +52,10 @@ WIDTH = BOARD_PX
 HEIGHT = BOARD_PX + STATUS_H
 FPS = 60
 
-PLAYER_COLOR = Color.WHITE
+PLAYER_COLOR = Color.WHITE  
 BOT_COLOR = Color.BLACK
 BOT_DEPTH = 3
+FLIPPED = False
 
 LIGHT_SQ = pygame.Color(240, 217, 181)
 DARK_SQ = pygame.Color(181, 136, 99)
@@ -119,6 +120,8 @@ def sq_to_screen(sq: int) -> tuple[int, int]:
     """Top-left pixel of the square (board is offset right of the eval bar)."""
     file_idx = CBoard.get_file_idx(sq)
     rank_idx = CBoard.get_rank_idx(sq)
+    if FLIPPED:
+        return BOARD_ORIGIN_X + (7 - file_idx) * SQUARE_SIZE, rank_idx * SQUARE_SIZE
     return BOARD_ORIGIN_X + file_idx * SQUARE_SIZE, (7 - rank_idx) * SQUARE_SIZE
 
 
@@ -128,10 +131,12 @@ def sq_center(sq: int) -> tuple[int, int]:
 
 
 def screen_to_sq(x: int, y: int) -> int:
-    file_idx = (x - BOARD_ORIGIN_X) // SQUARE_SIZE
-    rank_idx = 7 - y // SQUARE_SIZE
-    if not (0 <= file_idx <= 7 and 0 <= rank_idx <= 7):
+    col = (x - BOARD_ORIGIN_X) // SQUARE_SIZE
+    row = y // SQUARE_SIZE
+    if not (0 <= col <= 7 and 0 <= row <= 7):
         return -1
+    file_idx = 7 - col if FLIPPED else col
+    rank_idx = row if FLIPPED else 7 - row
     return CBoard.get_square_idx(rank_idx, file_idx)
 
 
@@ -376,9 +381,16 @@ def draw_game_over(screen: pygame.Surface, board: CBoard):
     screen.blit(sub, sub.get_rect(center=(cx, HEIGHT // 2 + 36)))
 
 
-def draw_status(screen: pygame.Surface, board: CBoard, bot_thinking: bool, note: str):
+def draw_status(
+    screen: pygame.Surface,
+    board: CBoard,
+    bot_thinking: bool,
+    note: str,
+    player_color: Color,
+    analyzing: bool = False,
+):
     """Status bar under the board, spanning the eval bar + board width."""
-    your_turn = not board.game_over and not bot_thinking and not note and board.turn == PLAYER_COLOR
+    your_turn = not board.game_over and not bot_thinking and not note and board.turn == player_color
     bar = pygame.Surface((MOVELIST_W, STATUS_H), pygame.SRCALPHA)
     bar.fill(STATUS_TURN_BG if your_turn else STATUS_BG)
     screen.blit(bar, (0, BOARD_PX))
@@ -386,15 +398,19 @@ def draw_status(screen: pygame.Surface, board: CBoard, bot_thinking: bool, note:
     if board.game_over:
         return  # game-over overlay covers this
 
+    player_name = "White" if player_color == Color.WHITE else "Black"
+    bot_name = "Black" if player_color == Color.WHITE else "White"
     font = pygame.font.SysFont(None, 28)
     if note:
         msg, color = note, (255, 140, 140)
+    elif analyzing:
+        msg, color = "Analyzing...", (120, 205, 205)
     elif bot_thinking:
         msg, color = "Bot is thinking...", (200, 200, 100)
     elif your_turn:
-        msg, color = "Your turn  (White)", (245, 245, 245)
+        msg, color = f"Your turn  ({player_name})", (245, 245, 245)
     else:
-        msg, color = "Bot's turn  (Black)", (160, 160, 255)
+        msg, color = f"Bot's turn  ({bot_name})", (160, 160, 255)
 
     text = font.render(msg, True, color)
     screen.blit(text, (10, BOARD_PX + 8))
@@ -481,6 +497,11 @@ def main(args):
     collapsed = {"captured": False, "moves": False}
     show_extras = False
     viz_mode = "pv"  # off | pv | top3 | density
+    # Suppress the search overlays after stepping back through moves
+    viz_stale = False
+    player_color = PLAYER_COLOR
+    bot_color = BOT_COLOR
+    move_time_ms = 0  # per-move search budget; 0 = depth-limited only
 
     selected_sq: int | None = None
     legal_mask: int = 0
@@ -492,8 +513,10 @@ def main(args):
     move_scroll = 0  # rows scrolled up from the bottom of the list
     move_max_scroll = 0
 
-    # Bot state: mutated from background thread via dict to avoid nonlocal rebinding
-    bot: dict = {"thinking": False, "move": None}
+    # Bot state: mutated from background thread via dict to avoid nonlocal rebinding.
+    # 'apply' distinguishes a real move (played on the board) from a Re-evaluate
+    # pass (telemetry only, move discarded).
+    bot: dict = {"thinking": False, "move": None, "apply": True}
     menu_hotspots: list = []
     gear_rect = pygame.Rect(WINDOW_W - 34, 8, 26, 26)
 
@@ -518,19 +541,42 @@ def main(args):
         move_scroll = 0
         probe.request(board.to_fen())
 
-    def _trigger_bot():
-        if board.game_over or board.turn != BOT_COLOR:
+    def _start_engine(apply: bool):
+        """Run the engine on the current position in a daemon thread. apply=True
+        plays the result (a real bot move); apply=False just refreshes the
+        visualization telemetry (Re-evaluate)."""
+        nonlocal viz_stale
+        if bot["thinking"] or board.game_over:
             return
         bot["thinking"] = True
+        bot["apply"] = apply
+        viz_stale = False  # a fresh search is starting; overlays are live again
         board_copy = copy.deepcopy(board)
         depth = applied["depth"]
+        time_limit = move_time_ms or None
 
         def _run():
-            bot["move"] = engine.get_best_move(board_copy, depth)
+            bot["move"] = engine.get_best_move(board_copy, depth, time_limit)
             bot["thinking"] = False
 
         # Daemon thread: auto terminates as all non-daemon threads finish
         threading.Thread(target=_run, daemon=True).start()
+
+    def _trigger_bot():
+        if board.turn != bot_color:
+            return
+        _start_engine(apply=True)
+
+    def _reevaluate():
+        """Recompute the engine's view of the current position for the overlays
+        (e.g. after stepping back through moves)."""
+        _start_engine(apply=False)
+
+    def _force_move():
+        """Cut off the engine's current think; iterative deepening means it falls
+        back to the best move from the last completed depth."""
+        if bot["thinking"] and hasattr(engine, "stop"):
+            engine.stop()
 
     def _refresh_last_move():
         nonlocal last_move
@@ -538,33 +584,35 @@ def main(args):
 
     def _undo():
         """Step back to the previous position where it's the player's turn."""
-        nonlocal cursor, move_scroll
+        nonlocal cursor, move_scroll, viz_stale
         if bot["thinking"] or cursor == 0:
             return
         while cursor > 0:
             board.unmake_move()
             cursor -= 1
-            if board.turn == PLAYER_COLOR:
+            if board.turn == player_color:
                 break
         board.game_over = False
         board.winner = None
         _refresh_last_move()
         move_scroll = 0
+        viz_stale = True  # arrows now describe a position we've left; hide them
 
     def _redo():
         """Replay the redo tail forward to the next player-to-move position."""
-        nonlocal cursor, move_scroll
+        nonlocal cursor, move_scroll, viz_stale
         if bot["thinking"] or cursor >= len(move_log):
             return
         while cursor < len(move_log):
             f, t, promo = move_log[cursor]
             board.make_move(f, t, promo)
             cursor += 1
-            if board.turn == PLAYER_COLOR:
+            if board.turn == player_color:
                 break
         _refresh_last_move()
         _check_game_over()
         move_scroll = 0
+        viz_stale = True
 
     def _apply_settings():
         """Rebuild the engine from 'pending'; revert and warn on failure."""
@@ -592,7 +640,9 @@ def main(args):
         nonlocal viz_mode
         if viz_mode in ("top3", "density") and not _analysis_ok():
             viz_mode = "pv"
-        engine.set_multipv(3 if viz_mode in ("top3", "density") else 1)
+        # Run the full top-3 analysis whenever any tree-search overlay is on.
+        want_full = viz_mode != "off" and _analysis_ok()
+        engine.set_multipv(3 if want_full else 1)
 
     def _set_viz(mode):
         nonlocal viz_mode
@@ -619,27 +669,50 @@ def main(args):
         if not bot["thinking"]:
             _apply_settings()
 
-    def _reset():
-        nonlocal board, selected_sq, legal_mask, promo_pending, last_move
-        nonlocal status_note, cursor, move_scroll
+    def _reset(new_player_color: Color | None = None):
+        nonlocal board, player_color, bot_color, selected_sq, legal_mask, promo_pending
+        nonlocal last_move, status_note, cursor, move_scroll, viz_stale
+        global FLIPPED
+        if bot["thinking"]:
+            return
+        if new_player_color is not None:
+            player_color = new_player_color
+            bot_color = new_player_color.opponent()
+            FLIPPED = player_color == Color.BLACK  # show the human's side at the bottom
         board = CBoard()
         selected_sq, legal_mask, promo_pending, last_move = None, 0, None, None
         move_log.clear()
         cursor = 0
         move_scroll = 0
+        viz_stale = False
         bot["move"] = None
+        bot["apply"] = True
         status_note = ""
+        if hasattr(engine, "new_game"):
+            engine.new_game()  # clear killers/history between games
         probe.request(board.to_fen())
+        if board.turn == bot_color:
+            _trigger_bot()  # human plays Black: the bot (White) opens
+
+    def _flip():
+        """Rotate the board view without disturbing the game."""
+        global FLIPPED
+        FLIPPED = not FLIPPED
+
+    _apply_multipv()  # match the engine's MultiPV to the initial visualization mode
 
     running = True
     while running:
-        # Apply bot move when the background thread has finished
-        if not bot["thinking"] and bot["move"] is not None and not board.game_over:
-            from_square, to_square, promotion = bot["move"]
+        # Consume the background thread's result. A real bot move (apply) gets
+        # played; a Re-evaluate pass only refreshed the overlays, so it's discarded.
+        if not bot["thinking"] and bot["move"] is not None:
+            move = bot["move"]
             bot["move"] = None
-            board.make_move(from_square, to_square, promotion)
-            _record_move((from_square, to_square, promotion))
-            _check_game_over()
+            if bot["apply"] and move is not None and not board.game_over:
+                from_square, to_square, promotion = move
+                board.make_move(from_square, to_square, promotion)
+                _record_move((from_square, to_square, promotion))
+                _check_game_over()
 
         if not bot["thinking"] and pending != applied:
             _apply_settings()
@@ -679,6 +752,18 @@ def main(args):
                         _set_pending(
                             "depth", sidebar.depth_from_click(hit.rect, event.pos[0], lo, hi)
                         )
+                    elif kind == "movetime":
+                        _, lo, hi = hit.action
+                        val = sidebar.slider_value_from_click(hit.rect, event.pos[0], lo, hi)
+                        move_time_ms = int(round(val / 500) * 500)  # snap to 0.5s steps
+                    elif kind == "reeval":
+                        _reevaluate()
+                    elif kind == "force":
+                        _force_move()
+                    elif kind == "newgame":
+                        _reset(Color.WHITE if hit.action[1] == "white" else Color.BLACK)
+                    elif kind == "flip":
+                        _flip()
                     continue
                 # Click outside an open extras menu closes it.
                 if show_extras and not gear_rect.collidepoint(event.pos):
@@ -686,7 +771,7 @@ def main(args):
                     continue
 
                 # 2) Board interactions (player's turn only).
-                if bot["thinking"] or board.turn != PLAYER_COLOR:
+                if bot["thinking"] or board.turn != player_color:
                     continue
 
                 if promo_pending is not None:
@@ -742,13 +827,16 @@ def main(args):
                 if (probe.available and probe.score is not None)
                 else engine.last_info.get("score")
             )
-            eval_probe.draw_eval_bar(screen, pygame.Rect(0, 0, EVAL_BAR_W, BOARD_PX), score)
+            eval_probe.draw_eval_bar(
+                screen, pygame.Rect(0, 0, EVAL_BAR_W, BOARD_PX), score, flipped=FLIPPED
+            )
 
         draw_board(screen, selected_sq, last_move if toggles["last_move"] else None)
         draw_pieces(screen, board)
         if not board.game_over and promo_pending is None:
             draw_move_dots(screen, board, legal_mask)
-        if viz_mode != "off" and not board.game_over and promo_pending is None:
+        # Overlays are hidden after stepping back (viz_stale) until Re-evaluate runs.
+        if viz_mode != "off" and not viz_stale and not board.game_over and promo_pending is None:
             if viz_mode == "pv":
                 draw_search_arrows(screen, engine.last_info.get("pv", []))
             elif viz_mode == "top3":
@@ -761,12 +849,15 @@ def main(args):
                 draw_density_cloud(screen, engine.last_info.get("effort", {}))
 
         if promo_pending is not None:
-            promo_rects = draw_promotion_picker(screen, PLAYER_COLOR)
+            promo_rects = draw_promotion_picker(screen, player_color)
 
         if board.game_over:
             draw_game_over(screen, board)
 
-        draw_status(screen, board, bot["thinking"], status_note)
+        draw_status(
+            screen, board, bot["thinking"], status_note, player_color,
+            analyzing=bot["thinking"] and not bot["apply"],
+        )
 
         # ── Right menu ──────────────────────────────────────────────────────────
         pygame.draw.rect(screen, sidebar.PANEL_BG, (MENU_X, 0, MENU_W, WINDOW_H))
@@ -782,6 +873,16 @@ def main(args):
         my = sidebar.draw_performance(screen, mx, my, mw, engine.last_info)
 
         my, hs = sidebar.draw_visualization(screen, mx, my, mw, viz_mode, _analysis_ok())
+        menu_hotspots.extend(hs)
+
+        my, hs = sidebar.draw_engine_control(
+            screen, mx, my, mw, move_time_ms, bot["thinking"], can_reeval=viz_mode != "off"
+        )
+        menu_hotspots.extend(hs)
+
+        my, hs = sidebar.draw_game_controls(
+            screen, mx, my, mw, player_color == Color.WHITE, FLIPPED, bot["thinking"]
+        )
         menu_hotspots.extend(hs)
 
         hs, my = sidebar.draw_collapsible_header(

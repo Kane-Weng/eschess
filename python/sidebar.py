@@ -98,9 +98,26 @@ def _slider(screen, x, y, width, value, lo, hi, hotspots, enabled=True) -> int:
 
 def depth_from_click(rect, mouse_x, lo, hi) -> int:
     """Map a click x within a slider track rect to an integer depth in [lo, hi]."""
+    return round(slider_value_from_click(rect, mouse_x, lo, hi))
+
+
+def slider_value_from_click(rect, mouse_x, lo, hi) -> float:
+    """Map a click x within a slider track rect to a value in [lo, hi]."""
     frac = (mouse_x - rect.x) / rect.width if rect.width else 0
     frac = max(0.0, min(1.0, frac))
-    return round(lo + frac * (hi - lo))
+    return lo + frac * (hi - lo)
+
+
+def _button(screen, rect, label, hotspots, action, enabled=True, selected=False) -> None:
+    """A single labelled button; greyed when disabled, ringed when selected."""
+    bg = BTN_SEL_BG if (selected and enabled) else (BTN_BG if enabled else BTN_DIS_BG)
+    pygame.draw.rect(screen, bg, rect, border_radius=5)
+    if selected and enabled:
+        pygame.draw.rect(screen, (210, 225, 255), rect, 2, border_radius=5)
+    txt = _font(18).render(label, True, TEXT_COL if enabled else BTN_DIS_TXT)
+    screen.blit(txt, txt.get_rect(center=rect.center))
+    if enabled:
+        hotspots.append(Hotspot(rect, action))
 
 
 def draw_engine_settings(screen, x, y, width, pending, avail, dirty) -> int:
@@ -201,6 +218,70 @@ def draw_visualization(screen, x, y, width, mode, analysis_ok) -> tuple[int, lis
         screen.blit(lab, lab.get_rect(center=rect.center))
         if on:
             hotspots.append(Hotspot(rect, ("viz", val)))
+    return y + ROW_H + 10, hotspots
+
+
+MOVE_TIME_MAX_MS = 10_000  # ceiling of the "Move time" slider; 0 = no cap
+
+
+def draw_engine_control(screen, x, y, width, move_time_ms, busy, can_reeval) -> tuple[int, list]:
+    """Engine-movement controls: a 'Move time' budget slider (0 = depth-only) plus
+    Re-evaluate (recompute the visualization for the current position) and Force
+    move (cut the search off and play its best line so far). 'busy' is true while
+    the engine is running, which is exactly when Force is useful and Re-eval is not."""
+    hotspots: list[Hotspot] = []
+    y = _title(screen, "Engine control", x, y)
+
+    label = (
+        "Move time: off (depth)" if not move_time_ms else f"Move time: {move_time_ms / 1000:.1f}s"
+    )
+    screen.blit(_font(20).render(label, True, TEXT_COL), (x, y))
+    y += 24
+    track = pygame.Rect(x, y + 6, width, 8)
+    pygame.draw.rect(screen, TRACK_BG, track, border_radius=4)
+    frac = move_time_ms / MOVE_TIME_MAX_MS
+    fill = (track.x, track.y, int(track.width * frac), track.height)
+    pygame.draw.rect(screen, TRACK_FILL, fill, border_radius=4)
+    pygame.draw.circle(
+        screen, (225, 235, 255), (track.x + int(track.width * frac), track.y + 4), 9
+    )
+    hotspots.append(Hotspot(pygame.Rect(x, y, width, 26), ("movetime", 0, MOVE_TIME_MAX_MS)))
+    y += 30
+
+    gap = 6
+    bw = (width - gap) // 2
+    _button(
+        screen, pygame.Rect(x, y, bw, ROW_H), "Re-evaluate", hotspots, ("reeval",),
+        enabled=can_reeval and not busy,
+    )
+    _button(
+        screen, pygame.Rect(x + bw + gap, y, bw, ROW_H), "Force move", hotspots, ("force",),
+        enabled=busy,
+    )
+    return y + ROW_H + 10, hotspots
+
+
+def draw_game_controls(screen, x, y, width, player_white, flipped, busy) -> tuple[int, list]:
+    """New-game side picker (White/Black, restarts the game) and a Flip-view toggle
+    that just rotates the board without resetting. New game is blocked mid-search."""
+    hotspots: list[Hotspot] = []
+    y = _title(screen, "Game", x, y)
+    y = _label(screen, "New game as", x, y)
+
+    gap = 6
+    bw = (width - 2 * gap) // 3
+    _button(
+        screen, pygame.Rect(x, y, bw, ROW_H), "White", hotspots, ("newgame", "white"),
+        enabled=not busy, selected=player_white,
+    )
+    _button(
+        screen, pygame.Rect(x + bw + gap, y, bw, ROW_H), "Black", hotspots, ("newgame", "black"),
+        enabled=not busy, selected=not player_white,
+    )
+    _button(
+        screen, pygame.Rect(x + 2 * (bw + gap), y, bw, ROW_H), "Flip", hotspots, ("flip",),
+        selected=flipped,
+    )
     return y + ROW_H + 10, hotspots
 
 

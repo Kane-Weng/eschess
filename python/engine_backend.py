@@ -134,12 +134,22 @@ class UCIBackend:
         except Exception:
             pass
 
-    def get_best_move(self, board, depth: int = 3):
+    def stop(self) -> None:
+        """Ask the engine to stop searching now and emit its best move so far."""
+        try:
+            self._send("stop")  
+        except Exception:
+            pass
+
+    def get_best_move(self, board, depth: int = 3, time_limit_ms: float | None = None):
         """Return (from, to, promo|None) for the side to move, via UCI."""
         assert self._proc.stdout is not None
         white = board.turn == Color.WHITE
         self._send(f"position fen {board.to_fen()}")
-        self._send(f"go depth {depth}")
+        go = f"go depth {depth}"
+        if time_limit_ms:
+            go += f" movetime {int(time_limit_ms)}"
+        self._send(go)
         info = {
             "nodes": 0,
             "nps": 0,
@@ -250,8 +260,11 @@ class PolicyBackend:
     def set_multipv(self, k: int) -> None:
         """No tree search, so MultiPV / density analysis is unavailable."""
 
-    def get_best_move(self, board, depth: int = 3):
-        """Return (from, to, promo|None); depth is unused (no tree search)."""
+    def stop(self) -> None:
+        """The policy net returns instantly"""
+
+    def get_best_move(self, board, depth: int = 3, time_limit_ms: float | None = None):
+        """Return (from, to, promo|None); depth/time are unused (no tree search)."""
         import time
 
         from nn.inference import policy_priors

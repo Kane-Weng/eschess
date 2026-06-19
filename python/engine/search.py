@@ -307,16 +307,23 @@ class Search:
     # ── Public API ───────────────────────────────────────────────────────────
 
     def set_multipv(self, k: int) -> None:
-        """k>1 switches get_best_move to a full root analysis (for the GUI)."""
+        """k>1 enriches get_best_move's telemetry with the ranked top-k lines and
+        per-move node effort (for the GUI's MultiPV / density overlays)."""
         self.multipv = max(1, k)
 
-    def get_best_move(self, board: CBoard, depth: int = 3) -> Move | None:
+    def stop(self) -> None:
+        """Ask the in-progress search to bail out."""
+        self._stop = True
+
+    def get_best_move(
+        self, board: CBoard, depth: int = 3, time_limit_ms: float | None = None
+    ) -> Move | None:
         """Iterative deepening search; returns (from, to, promo) for the current player."""
-        if self.multipv > 1:
-            return self._best_move_multipv(board, depth)
+        want_multi = self.multipv > 1
+        white = board.turn == Color.WHITE
 
         def _record(d: int, score: float, nodes: int, elapsed: float, pv: list) -> None:
-            self.last_info = {
+            info = {
                 "nodes": nodes,
                 "nps": int(nodes / elapsed) if elapsed > 0 else 0,
                 "score": score,
@@ -325,46 +332,27 @@ class Search:
                 "pv": list(pv),
                 "multipv": [],
                 "effort": {},
+                "stm_white": white,
             }
+            # telemetry is refreshed after each completed depth with 
+            # the ranked top lines and per-move effort
+            if want_multi and self._root_info:
+                ranked = sorted(self._root_info, key=lambda r: r[1], reverse=white)
+                info["effort"] = {move: subtree_nodes for move, _, subtree_nodes in ranked}
+                lines = []
+                for move, move_score, _ in ranked[: self.multipv]:
+                    from_square, to_square, promotion = move
+                    board.make_move(from_square, to_square, promotion)
+                    line_pv = [move] + self._extract_pv(board, d)
+                    board.unmake_move()
+                    lines.append({"move": move, "score": move_score, "pv": line_pv})
+                info["multipv"] = lines
+            self.last_info = info
 
-        move, _ = self.search_position(board, max_depth=depth, info_callback=_record)
+        move, _ = self.search_position(
+            board, max_depth=depth, time_limit_ms=time_limit_ms, info_callback=_record
+        )
         return move
-
-    def _best_move_multipv(self, board: CBoard, depth: int) -> Move | None:
-        """Pick the best move from a full root analysis, recording the top lines
-        and per-move node effort for the GUI's MultiPV / density overlays."""
-        start = time.time()
-        results = self.analyze(board, depth)
-        if not results:
-            self.last_info = {
-                "nodes": 0,
-                "nps": 0,
-                "score": None,
-                "depth": depth,
-                "time_s": time.time() - start,
-                "pv": [],
-                "multipv": [],
-                "effort": {},
-            }
-            return None
-        elapsed = time.time() - start
-        total_nodes = sum(r["nodes"] for r in results)
-        best = results[0]
-        self.last_info = {
-            "nodes": total_nodes,
-            "nps": int(total_nodes / elapsed) if elapsed > 0 else 0,
-            "score": best["score"],
-            "depth": depth,
-            "time_s": elapsed,
-            "pv": best["pv"],
-            "multipv": [
-                {"move": r["move"], "score": r["score"], "pv": r["pv"]}
-                for r in results[: self.multipv]
-            ],
-            "effort": {r["move"]: r["nodes"] for r in results},
-            "stm_white": board.turn == Color.WHITE,
-        }
-        return best["move"]
 
     def analyze(self, board: CBoard, depth: int) -> list[dict]:
         """Run the normal (alpha-beta pruned) search, then report per root move

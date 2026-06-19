@@ -30,7 +30,7 @@ def score_to_white_fraction(score_pawns: float) -> float:
     return 0.5 + 0.5 * math.tanh(score_pawns / 4.0)
 
 
-def draw_eval_bar(screen, rect, score_pawns) -> None:
+def draw_eval_bar(screen, rect, score_pawns, flipped: bool = False) -> None:
     """Vertical bar in `rect`; score_pawns None -> neutral grey (no score)."""
     global _EVAL_FONT
 
@@ -40,8 +40,17 @@ def draw_eval_bar(screen, rect, score_pawns) -> None:
         pygame.draw.line(screen, MID_LINE, (rect.x, rect.centery), (rect.right, rect.centery), 1)
     else:
         frac = score_to_white_fraction(score_pawns)
-        white_h = int(rect.height * frac)
-        pygame.draw.rect(screen, WHITE_FILL, (rect.x, rect.bottom - white_h, rect.width, white_h))
+        if flipped:
+            pygame.draw.rect(screen, WHITE_FILL, rect)
+            bottom_h = int(rect.height * (1 - frac))
+            pygame.draw.rect(
+                screen, BLACK_FILL, (rect.x, rect.bottom - bottom_h, rect.width, bottom_h)
+            )
+        else:
+            bottom_h = int(rect.height * frac)
+            pygame.draw.rect(
+                screen, WHITE_FILL, (rect.x, rect.bottom - bottom_h, rect.width, bottom_h)
+            )
         # faint midline marks the 50/50 point
         pygame.draw.line(screen, MID_LINE, (rect.x, rect.centery), (rect.right, rect.centery), 1)
 
@@ -56,7 +65,9 @@ def draw_eval_bar(screen, rect, score_pawns) -> None:
         else:
             score_str = f"{score_pawns:+.1f}"
 
-        text_color = BLACK_FILL if white_h > 25 else WHITE_FILL
+        # The label sits at the bottom; its colour matches whatever fills there.
+        bottom_is_light = bottom_h > 25 if not flipped else bottom_h <= 25
+        text_color = BLACK_FILL if bottom_is_light else WHITE_FILL
         text_surf = _EVAL_FONT.render(score_str, True, text_color)
         text_rect = text_surf.get_rect(centerx=rect.centerx, bottom=rect.bottom - 4)
         screen.blit(text_surf, text_rect)
