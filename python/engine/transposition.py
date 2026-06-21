@@ -6,13 +6,7 @@ Transposition Table, database that stores results of previously performed
 searches, using Zobrist Hashing.
 """
 
-from enum import IntEnum
-
-
-class TTFlag(IntEnum):
-    EXACT = 0  # score is exact
-    LOWER = 1  # beta cutoff: score is a lower bound
-    UPPER = 2  # failed low: score is an upper bound
+from ._generated import TTFlag
 
 
 class TTEntry:

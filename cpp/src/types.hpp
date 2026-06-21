@@ -2,38 +2,12 @@
 // python/engine/board.py (LERF mapping, Color/PieceType ordering, castle bits).
 #pragma once
 
-#include <cstdint>
+// U64 alias, Color/PieceType enums, castle bits and bitboard masks come from the
+// shared schema (schema/engine.toml -> generated.hpp).
+#include "generated.hpp"
 
-using U64 = uint64_t;
-
-// Color & PieceType
-enum Color { WHITE = 0, BLACK = 1 };
+// `opponent` is behavior (not data), so it stays here; Color comes from generated.
 inline Color opponent(Color c) { return static_cast<Color>(1 - c); }
-enum PieceType { PAWN = 0, KNIGHT = 1, BISHOP = 2, ROOK = 3, QUEEN = 4, KING = 5, NO_PIECE = -1 };
-
-// Castling-rights bitmask
-constexpr int CR_WK = 0b1000;
-constexpr int CR_WQ = 0b0100;
-constexpr int CR_BK = 0b0010;
-constexpr int CR_BQ = 0b0001;
-
-// Bitboard constants
-constexpr U64 FULL_BOARD = 0xFFFFFFFFFFFFFFFFULL;
-
-constexpr U64 FILE_A = 0x0101010101010101ULL;
-constexpr U64 FILE_H = 0x8080808080808080ULL;
-constexpr U64 FILE_AB = FILE_A | (FILE_A << 1);
-constexpr U64 FILE_GH = FILE_H | (FILE_H >> 1);
-
-constexpr U64 NOT_FILE_A = FULL_BOARD ^ FILE_A;
-constexpr U64 NOT_FILE_H = FULL_BOARD ^ FILE_H;
-constexpr U64 NOT_FILE_AB = FULL_BOARD ^ FILE_AB;
-constexpr U64 NOT_FILE_GH = FULL_BOARD ^ FILE_GH;
-
-constexpr U64 RANK_1 = 0x00000000000000FFULL;
-constexpr U64 RANK_2 = 0x000000000000FF00ULL;
-constexpr U64 RANK_7 = 0x00FF000000000000ULL;
-constexpr U64 RANK_8 = 0xFF00000000000000ULL;
 
 // LERF square index helpers
 inline U64 square_to_bits(int square) { return 1ULL << square; }

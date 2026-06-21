@@ -8,12 +8,16 @@ use std::time::{Duration, Instant};
 
 use crate::board::CBoard;
 use crate::evaluate::{BaseEvaluate, MediumEvaluate};
+use crate::generated::{
+    CP, ORDER_CAPTURE_BASE, ORDER_KILLER1, ORDER_KILLER2, ORDER_PROMO, ORDER_QUEEN_PROMO,
+    ORDER_TT_MOVE, PROMO_PIECES,
+};
 use crate::tt::{TTFlag, TranspositionTable};
 use crate::types::*;
 
-pub const MAX_PLY: usize = 64;
-pub const MAX_HISTORY: i32 = 16384;
-pub const QS_DEPTH: i32 = 8;
+// MAX_PLY / MAX_HISTORY / QS_DEPTH come from the shared schema; re-export so
+// `eschess::search::MAX_PLY` (used by the uci binary) keeps resolving.
+pub use crate::generated::{MAX_HISTORY, MAX_PLY, QS_DEPTH};
 
 /// One root move's full-window analysis (GUI MultiPV / density overlays).
 pub struct RootAnalysis {
@@ -23,9 +27,7 @@ pub struct RootAnalysis {
     pub pv: Vec<Move>,
 }
 
-// Centipawn values for MVV-LVA ordering (matches _CP in search.py).
-const CP: [i32; 6] = [100, 320, 330, 500, 900, 0];
-const PROMO_PIECES: [i32; 4] = [QUEEN as i32, ROOK as i32, BISHOP as i32, KNIGHT as i32];
+// CP (MVV-LVA centipawns) and PROMO_PIECES come from the shared schema (crate::generated).
 
 /// Expand legal moves into (from, to, promo). With captures_only, keep only
 /// captures and (queen) promotions. Mirrors _flat_moves in search.py.
@@ -138,13 +140,13 @@ impl Search {
 
     fn order_key(&self, board: &CBoard, mv: &Move, ply: usize, tt_move: &Move) -> i32 {
         if mv == tt_move {
-            return 20000;
+            return ORDER_TT_MOVE;
         }
         if mv.promotion == QUEEN as i32 {
-            return 10000;
+            return ORDER_QUEEN_PROMO;
         }
         if mv.promotion != NO_PIECE {
-            return 9000;
+            return ORDER_PROMO;
         }
         let captured = board.get_piece_at(mv.to);
         if !captured.is_empty() {
@@ -154,13 +156,13 @@ impl Search {
             } else {
                 CP[aggressor.ptype as usize]
             };
-            return 5000 + CP[captured.ptype as usize] * 10 - agg_val;
+            return ORDER_CAPTURE_BASE + CP[captured.ptype as usize] * 10 - agg_val;
         }
         if self.killers[ply][0] == *mv {
-            return 4000;
+            return ORDER_KILLER1;
         }
         if self.killers[ply][1] == *mv {
-            return 3000;
+            return ORDER_KILLER2;
         }
         self.history[hist_idx(board.turn, mv.from, mv.to)]
     }

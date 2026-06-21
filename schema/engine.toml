@@ -1,0 +1,401 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# eschess engine schema — SINGLE SOURCE OF TRUTH
+#
+# The chess engine is implemented in python/, cpp/, & rust/ as parallel
+# ports kept identical by parity tests (perft + fixed-depth search). The enums
+# and constant tables below are the values those ports MUST share byte-for-byte.
+# This file is the canonical origin; `schema/codegen.py` renders it into:
+#
+#     python/engine/_generated.py     cpp/src/generated.hpp     rust/src/generated.rs
+#
+# Edit values HERE, then run `python3 schema/codegen.py` and commit the result.
+# A CI / pre-commit freshness check fails if the generated files are stale.
+#
+# Scope: only pure DATA (enums + constant tables) is generated. Behavior
+# (move generation, search, FEN parsing) and the struct/API/wire-contract specs
+# at the bottom are reference documentation, validated by the parity tests, not
+# generated. 
+# ─────────────────────────────────────────────────────────────────────────────
+
+[meta]
+schema_version = 1
+source = "python/engine (board.py, search.py, evaluate.py, transposition.py, uci.py)"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ENUMS
+# Each port renders these differently; codegen encodes the per-language idiom:
+#   python -> IntEnum   cpp -> enum / enum class   rust -> pub const / pub enum
+# ═══════════════════════════════════════════════════════════════════════════════
+
+[[enum]]
+name = "Color"
+members = [["WHITE", 0], ["BLACK", 1]]
+cpp_kind = "enum"                 # enum Color { WHITE = 0, BLACK = 1 };
+rust_kind = "const"               # pub const WHITE: usize = 0; ...
+rust_const_type = "usize"
+# Behavior kept with the enum on the Python side (cpp/rust expose a free fn).
+py_methods = """
+def opponent(self) -> "Color":
+    return Color(1 - self.value)
+"""
+
+[[enum]]
+name = "PieceType"
+members = [["PAWN", 0], ["KNIGHT", 1], ["BISHOP", 2], ["ROOK", 3], ["QUEEN", 4], ["KING", 5]]
+cpp_kind = "enum"
+cpp_extra = [["NO_PIECE", -1]]    # cpp folds the sentinel into the enum
+rust_kind = "const"
+rust_const_type = "usize"
+
+[[enum]]
+name = "TTFlag"
+members = [["EXACT", 0], ["LOWER", 1], ["UPPER", 2]]
+cpp_kind = "enum_class"           # enum class TTFlag { EXACT = 0, ... };
+rust_kind = "enum"                # pub enum TTFlag { Exact, Lower, Upper }
+rust_variant_case = "pascal"      # EXACT -> Exact
+rust_derives = ["Clone", "Copy", "PartialEq", "Eq"]
+rust_explicit_values = false      # variants carry no `= N`
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SCALARS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Castling-rights bitmask (board.py CR_*).
+[[scalar]]
+name = "CR_WK"
+type = "int"
+value = 8
+fmt = "bin4"                      # render as 0b1000
+[[scalar]]
+name = "CR_WQ"
+type = "int"
+value = 4
+fmt = "bin4"
+[[scalar]]
+name = "CR_BK"
+type = "int"
+value = 2
+fmt = "bin4"
+[[scalar]]
+name = "CR_BQ"
+type = "int"
+value = 1
+fmt = "bin4"
+
+# Piece-type sentinel — cpp folds it into the enum, rust needs the const, python
+# uses None instead, so this const is rust-only.
+[[scalar]]
+name = "NO_PIECE"
+type = "int"
+value = -1
+langs = ["rust"]
+rust_type = "i32"
+
+# Bitboard masks (board.py). Stored as hex strings to stay inside TOML's signed
+# 64-bit integer range; codegen renders the right literal per language.
+[[scalar]]
+name = "FULL_BOARD"
+type = "u64"
+value = "0xFFFFFFFFFFFFFFFF"
+[[scalar]]
+name = "FILE_A"
+type = "u64"
+value = "0x0101010101010101"
+[[scalar]]
+name = "FILE_H"
+type = "u64"
+value = "0x8080808080808080"
+[[scalar]]
+name = "FILE_AB"
+type = "u64"
+value = "0x0303030303030303"
+[[scalar]]
+name = "FILE_GH"
+type = "u64"
+value = "0xC0C0C0C0C0C0C0C0"
+[[scalar]]
+name = "NOT_FILE_A"
+type = "u64"
+value = "0xFEFEFEFEFEFEFEFE"
+[[scalar]]
+name = "NOT_FILE_H"
+type = "u64"
+value = "0x7F7F7F7F7F7F7F7F"
+[[scalar]]
+name = "NOT_FILE_AB"
+type = "u64"
+value = "0xFCFCFCFCFCFCFCFC"
+[[scalar]]
+name = "NOT_FILE_GH"
+type = "u64"
+value = "0x3F3F3F3F3F3F3F3F"
+[[scalar]]
+name = "RANK_1"
+type = "u64"
+value = "0x00000000000000FF"
+[[scalar]]
+name = "RANK_2"
+type = "u64"
+value = "0x000000000000FF00"
+[[scalar]]
+name = "RANK_7"
+type = "u64"
+value = "0x00FF000000000000"
+[[scalar]]
+name = "RANK_8"
+type = "u64"
+value = "0xFF00000000000000"
+
+# Start position (board.py STARTPOS_FEN).
+[[scalar]]
+name = "STARTPOS_FEN"
+type = "str"
+value = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+
+# Search limits (search.py).
+[[scalar]]
+name = "MAX_PLY"
+type = "int"
+value = 64
+rust_type = "usize"
+[[scalar]]
+name = "MAX_HISTORY"
+type = "int"
+value = 16384
+rust_type = "i32"
+[[scalar]]
+name = "QS_DEPTH"
+type = "int"
+value = 8
+rust_type = "i32"
+
+# Move-ordering weights (search.py _order_key; were inline literals in all ports).
+[[scalar]]
+name = "ORDER_TT_MOVE"
+type = "int"
+value = 20000
+[[scalar]]
+name = "ORDER_QUEEN_PROMO"
+type = "int"
+value = 10000
+[[scalar]]
+name = "ORDER_PROMO"
+type = "int"
+value = 9000
+[[scalar]]
+name = "ORDER_CAPTURE_BASE"
+type = "int"
+value = 5000
+[[scalar]]
+name = "ORDER_KILLER1"
+type = "int"
+value = 4000
+[[scalar]]
+name = "ORDER_KILLER2"
+type = "int"
+value = 3000
+
+# UCI time-management + mate reporting (uci.py / cpp uci.cpp / rust bin/uci.rs).
+[[scalar]]
+name = "MATE_THRESHOLD"
+type = "float"
+value = 8000.0
+[[scalar]]
+name = "TIME_SAFETY"
+type = "float"
+value = 0.85
+[[scalar]]
+name = "MOVE_OVERHEAD_MS"
+type = "float"
+value = 20.0
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TABLES
+# kind: per_piece  -> indexed by PieceType (python: dict keyed by PieceType)
+#       per_square -> 64 entries in LERF order (python: flat list)
+#       plain      -> flat list
+# ═══════════════════════════════════════════════════════════════════════════════
+
+[[table]]
+name = "PIECE_VALUES"        # evaluate.py — pawn units
+kind = "per_piece"
+elem = "float"
+values = [1.0, 3.2, 3.3, 5.0, 9.0, 0.0]
+
+[[table]]
+name = "CP"                  # search.py _CP — MVV-LVA centipawns
+kind = "per_piece"
+elem = "int"
+values = [100, 320, 330, 500, 900, 0]
+
+[[table]]
+name = "PASSED_BONUS"        # evaluate.py — passed-pawn bonus by advancement 0..7
+kind = "plain"
+elem = "int"
+values = [0, 0, 10, 20, 35, 60, 100, 0]
+
+# Piece-square tables (evaluate.py), centipawns, White's perspective, LERF order.
+[[table]]
+name = "PAWN_PST"
+kind = "per_square"
+elem = "int"
+values = [
+    0,  0,  0,  0,  0,  0,  0,  0,
+    5, 10, 10,-20,-20, 10, 10,  5,
+    5, -5,-10,  0,  0,-10, -5,  5,
+    0,  0,  0, 20, 20,  0,  0,  0,
+    5,  5, 10, 25, 25, 10,  5,  5,
+   10, 10, 20, 30, 30, 20, 10, 10,
+   50, 50, 50, 50, 50, 50, 50, 50,
+    0,  0,  0,  0,  0,  0,  0,  0,
+]
+
+[[table]]
+name = "KNIGHT_PST"
+kind = "per_square"
+elem = "int"
+values = [
+  -50,-40,-30,-30,-30,-30,-40,-50,
+  -40,-20,  0,  0,  0,  0,-20,-40,
+  -30,  0, 10, 15, 15, 10,  0,-30,
+  -30,  5, 15, 20, 20, 15,  5,-30,
+  -30,  0, 15, 20, 20, 15,  0,-30,
+  -30,  5, 10, 15, 15, 10,  5,-30,
+  -40,-20,  0,  5,  5,  0,-20,-40,
+  -50,-40,-30,-30,-30,-30,-40,-50,
+]
+
+[[table]]
+name = "BISHOP_PST"
+kind = "per_square"
+elem = "int"
+values = [
+  -20,-10,-10,-10,-10,-10,-10,-20,
+  -10,  0,  0,  0,  0,  0,  0,-10,
+  -10,  0,  5, 10, 10,  5,  0,-10,
+  -10,  5,  5, 10, 10,  5,  5,-10,
+  -10,  0, 10, 10, 10, 10,  0,-10,
+  -10, 10, 10, 10, 10, 10, 10,-10,
+  -10,  5,  0,  0,  0,  0,  5,-10,
+  -20,-10,-10,-10,-10,-10,-10,-20,
+]
+
+[[table]]
+name = "ROOK_PST"
+kind = "per_square"
+elem = "int"
+values = [
+    0,  0,  0,  5,  5,  0,  0,  0,
+   -5,  0,  0,  0,  0,  0,  0, -5,
+   -5,  0,  0,  0,  0,  0,  0, -5,
+   -5,  0,  0,  0,  0,  0,  0, -5,
+   -5,  0,  0,  0,  0,  0,  0, -5,
+   -5,  0,  0,  0,  0,  0,  0, -5,
+    5, 10, 10, 10, 10, 10, 10,  5,
+    0,  0,  0,  0,  0,  0,  0,  0,
+]
+
+[[table]]
+name = "QUEEN_PST"
+kind = "per_square"
+elem = "int"
+values = [
+  -20,-10,-10, -5, -5,-10,-10,-20,
+  -10,  0,  0,  0,  0,  0,  0,-10,
+  -10,  0,  5,  5,  5,  5,  0,-10,
+   -5,  0,  5,  5,  5,  5,  0, -5,
+    0,  0,  5,  5,  5,  5,  0, -5,
+  -10,  5,  5,  5,  5,  5,  0,-10,
+  -10,  0,  5,  0,  0,  0,  0,-10,
+  -20,-10,-10, -5, -5,-10,-10,-20,
+]
+
+[[table]]
+name = "KING_MG_PST"          # midgame: stay castled, avoid the centre
+kind = "per_square"
+elem = "int"
+values = [
+   20, 30, 10,  0,  0, 10, 30, 20,
+   20, 20,  0,  0,  0,  0, 20, 20,
+  -10,-20,-20,-20,-20,-20,-20,-10,
+  -20,-30,-30,-40,-40,-30,-30,-20,
+  -30,-40,-40,-50,-50,-40,-40,-30,
+  -30,-40,-40,-50,-50,-40,-40,-30,
+  -30,-40,-40,-50,-50,-40,-40,-30,
+  -30,-40,-40,-50,-50,-40,-40,-30,
+]
+
+[[table]]
+name = "KING_EG_PST"          # endgame: centralise the king
+kind = "per_square"
+elem = "int"
+values = [
+  -50,-40,-30,-20,-20,-30,-40,-50,
+  -30,-20,-10,  0,  0,-10,-20,-30,
+  -30,-10, 20, 30, 30, 20,-10,-30,
+  -30,-10, 30, 40, 40, 30,-10,-30,
+  -30,-10, 30, 40, 40, 30,-10,-30,
+  -30,-10, 20, 30, 30, 20,-10,-30,
+  -30,-30,  0,  0,  0,  0,-30,-30,
+  -50,-30,-30,-30,-30,-30,-30,-50,
+]
+
+# Promotion piece ordering (search.py PROMO_PIECES). Rendered as PieceType
+# references: python -> [PieceType.QUEEN, ...], cpp -> {QUEEN, ...}, rust -> ints.
+[[piece_list]]
+name = "PROMO_PIECES"
+pieces = ["QUEEN", "ROOK", "BISHOP", "KNIGHT"]
+
+# PieceType -> PST lookup (evaluate.py _PST_MAP); KING uses the midgame table.
+[[pst_map]]
+name = "PST_MAP"
+entries = [
+    ["PAWN", "PAWN_PST"],
+    ["KNIGHT", "KNIGHT_PST"],
+    ["BISHOP", "BISHOP_PST"],
+    ["ROOK", "ROOK_PST"],
+    ["QUEEN", "QUEEN_PST"],
+    ["KING", "KING_MG_PST"],
+]
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# REFERENCE ONLY (NOT generated) — the behavioral contract the ports must honor,
+# guarded by the parity tests rather than by codegen.
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# structs:
+#   Move (search form)  = (from: 0-63, to: 0-63, promotion: PieceType|None/-1)
+#   Undo / board Move   = from, to, captured_piece, captured_color, promotion,
+#                         is_en_passant, is_castle, castle_rook_from/to,
+#                         prev_en_passant_square, prev_castling_rights,
+#                         prev_halfmove_clock, prev_zobrist_key
+#   CBoard              = colors[2], pieces[6], turn, en_passant_square,
+#                         castling_rights, halfmove_clock, fullmove, game_over,
+#                         winner, zobrist_key
+#                         (divergences: rust turn:usize vs Color enum;
+#                          rust Piece.ptype vs cpp/py Piece.type;
+#                          sentinels -1 in cpp/rust vs None in python)
+#   TTEntry             = key, depth, flag, score, best_move (+ valid in cpp/rust)
+#   SearchInfo (telem)  = nodes, nps, score, depth, time_s, pv, multipv, effort,
+#                         stm_white
+#
+# api:
+#   Search.get_best_move(board, depth=3, time_limit_ms=None) -> Move|None
+#   Search.search_position(board, max_depth, time_limit_ms, info_callback)
+#                         -> (Move, score)        # score in pawns, White's POV
+#   CBoard.get_all_legal_moves() -> [(square, legal_bits_u64)]
+#   BaseEvaluate.evaluate(board) -> float         # pawns, + = White better
+#
+# wire_contracts:
+#   FEN : "<placement> <side> <castling> <ep> <halfmove> <fullmove>"
+#         placement rank8->rank1, '/'-separated, digits = empty runs.
+#   UCI : moves as "e2e4" / "e7e8q"; "score cp N" or "score mate N" from STM POV.
+#   web : JSON, camelCase boundary (mirrors web/frontend/src/lib/engine/types.ts)
+#         req  { fen, depth, eval, multipv }
+#         resp { bestmove, info: { nodes, nps, score, depth, timeMs, pv[],
+#                                  multipv[], effort{}, stmWhite } }
+#
+# Eval positional bonuses remain inline literals in each port (low drift risk,
+# woven into expressions): simple eval 0.5 doubled / 0.50,0.25 knight / 0.75 king;
+# complex eval 0.20 doubled / 0.25 isolated / 0.50 bishop-pair / 0.005 mobility;
+# checkmate score base 9000 (+depth) in minimax.

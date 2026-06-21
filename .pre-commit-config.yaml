@@ -11,8 +11,10 @@ repos:
       - id: ruff
         args: [--fix]
         files: ^python/
+        exclude: ^python/engine/_generated\.py$
       - id: ruff-format
         files: ^python/
+        exclude: ^python/engine/_generated\.py$
 
   # C++: clang-format pinned to v17 (matches .clang-format / local toolchain).
   - repo: https://github.com/pre-commit/mirrors-clang-format
@@ -20,6 +22,18 @@ repos:
     hooks:
       - id: clang-format
         files: ^cpp/.*\.(cpp|hpp)$
+        exclude: ^cpp/src/generated\.hpp$
+
+  # Schema: the generated constant files must match schema/engine.toml. Fails if
+  # someone edits the schema (or a generated file) without re-running codegen.
+  - repo: local
+    hooks:
+      - id: schema-codegen
+        name: schema codegen is fresh (schema/engine.toml -> generated files)
+        entry: python3 schema/codegen.py --check
+        language: system
+        files: ^(schema/engine\.toml|schema/codegen\.py|python/engine/_generated\.py|cpp/src/generated\.hpp|rust/src/generated\.rs)$
+        pass_filenames: false
 
   # Rust: rustfmt + clippy on both crates, using the system toolchain.
   - repo: local

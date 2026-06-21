@@ -242,20 +242,26 @@ def draw_engine_control(screen, x, y, width, move_time_ms, busy, can_reeval) -> 
     frac = move_time_ms / MOVE_TIME_MAX_MS
     fill = (track.x, track.y, int(track.width * frac), track.height)
     pygame.draw.rect(screen, TRACK_FILL, fill, border_radius=4)
-    pygame.draw.circle(
-        screen, (225, 235, 255), (track.x + int(track.width * frac), track.y + 4), 9
-    )
+    pygame.draw.circle(screen, (225, 235, 255), (track.x + int(track.width * frac), track.y + 4), 9)
     hotspots.append(Hotspot(pygame.Rect(x, y, width, 26), ("movetime", 0, MOVE_TIME_MAX_MS)))
     y += 30
 
     gap = 6
     bw = (width - gap) // 2
     _button(
-        screen, pygame.Rect(x, y, bw, ROW_H), "Re-evaluate", hotspots, ("reeval",),
+        screen,
+        pygame.Rect(x, y, bw, ROW_H),
+        "Re-evaluate",
+        hotspots,
+        ("reeval",),
         enabled=can_reeval and not busy,
     )
     _button(
-        screen, pygame.Rect(x + bw + gap, y, bw, ROW_H), "Force move", hotspots, ("force",),
+        screen,
+        pygame.Rect(x + bw + gap, y, bw, ROW_H),
+        "Force move",
+        hotspots,
+        ("force",),
         enabled=busy,
     )
     return y + ROW_H + 10, hotspots
@@ -271,15 +277,29 @@ def draw_game_controls(screen, x, y, width, player_white, flipped, busy) -> tupl
     gap = 6
     bw = (width - 2 * gap) // 3
     _button(
-        screen, pygame.Rect(x, y, bw, ROW_H), "White", hotspots, ("newgame", "white"),
-        enabled=not busy, selected=player_white,
+        screen,
+        pygame.Rect(x, y, bw, ROW_H),
+        "White",
+        hotspots,
+        ("newgame", "white"),
+        enabled=not busy,
+        selected=player_white,
     )
     _button(
-        screen, pygame.Rect(x + bw + gap, y, bw, ROW_H), "Black", hotspots, ("newgame", "black"),
-        enabled=not busy, selected=not player_white,
+        screen,
+        pygame.Rect(x + bw + gap, y, bw, ROW_H),
+        "Black",
+        hotspots,
+        ("newgame", "black"),
+        enabled=not busy,
+        selected=not player_white,
     )
     _button(
-        screen, pygame.Rect(x + 2 * (bw + gap), y, bw, ROW_H), "Flip", hotspots, ("flip",),
+        screen,
+        pygame.Rect(x + 2 * (bw + gap), y, bw, ROW_H),
+        "Flip",
+        hotspots,
+        ("flip",),
         selected=flipped,
     )
     return y + ROW_H + 10, hotspots

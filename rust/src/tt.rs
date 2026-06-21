@@ -4,12 +4,8 @@
 
 use crate::types::{Move, NULL_MOVE, U64};
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum TTFlag {
-    Exact,
-    Lower,
-    Upper,
-}
+// TTFlag comes from the shared schema; re-export so `eschess::tt::TTFlag` holds.
+pub use crate::generated::TTFlag;
 
 #[derive(Clone, Copy)]
 pub struct TTEntry {

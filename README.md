@@ -74,6 +74,19 @@ transposition table. They are verified equivalent — identical perft counts and
 byte-identical search output (scores, node counts, principal variation) at a
 fixed depth — and run orders of magnitude faster.
 
+The shared enums and constant tables (piece values, piece-square tables, search
+limits, move-ordering weights, …) that the three ports must keep byte-identical
+live in one source of truth, [`schema/engine.toml`](schema/engine.toml).
+`schema/codegen.py` renders it into the per-language `_generated.py` /
+`generated.hpp` / `generated.rs` files each engine consumes. Edit values in the
+schema, then regenerate — a CI / pre-commit check fails if the generated files
+drift from it:
+
+```bash
+python3 schema/codegen.py            # regenerate the three constant files
+python3 schema/codegen.py --check    # CI/pre-commit guard: fail if stale
+```
+
 ```bash
 # C++  → cpp/build/uci
 cmake -S cpp -B cpp/build -DCMAKE_BUILD_TYPE=Release && cmake --build cpp/build -j

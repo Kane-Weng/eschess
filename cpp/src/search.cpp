@@ -7,10 +7,7 @@
 
 namespace {
 
-// Centipawn values for MVV-LVA ordering (matches _CP in search.py).
-const int CP[6] = {100, 320, 330, 500, 900, 0};
-
-const int PROMO_PIECES[4] = {QUEEN, ROOK, BISHOP, KNIGHT};
+// CP (MVV-LVA centipawns) and PROMO_PIECES come from generated.hpp (via search.hpp).
 
 // Expand legal moves into (from, to, promo). With captures_only, keep only
 // captures and (queen) promotions. Mirrors _flat_moves in search.py.
@@ -80,20 +77,20 @@ void Search::age_history() {
 }
 
 int Search::order_key(CBoard &board, const Move &move, int ply, const Move &tt_move) {
-    if (move == tt_move) return 20000;
+    if (move == tt_move) return ORDER_TT_MOVE;
 
-    if (move.promotion == QUEEN) return 10000;
-    if (move.promotion != NO_PIECE) return 9000;
+    if (move.promotion == QUEEN) return ORDER_QUEEN_PROMO;
+    if (move.promotion != NO_PIECE) return ORDER_PROMO;
 
     Piece captured = board.get_piece_at(move.to);
     if (!captured.empty()) {
         Piece aggressor = board.get_piece_at(move.from);
         int agg_val = aggressor.empty() ? 0 : CP[aggressor.type];
-        return 5000 + CP[captured.type] * 10 - agg_val;
+        return ORDER_CAPTURE_BASE + CP[captured.type] * 10 - agg_val;
     }
 
-    if (killers_[ply][0] == move) return 4000;
-    if (killers_[ply][1] == move) return 3000;
+    if (killers_[ply][0] == move) return ORDER_KILLER1;
+    if (killers_[ply][1] == move) return ORDER_KILLER2;
     return history_[board.turn][move.from][move.to];
 }
 

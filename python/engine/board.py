@@ -10,6 +10,27 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from enum import IntEnum, auto
 
+from ._generated import (
+    CR_BK,
+    CR_BQ,
+    CR_WK,
+    CR_WQ,
+    FILE_A,
+    FILE_H,
+    FULL_BOARD,
+    NOT_FILE_A,
+    NOT_FILE_AB,
+    NOT_FILE_GH,
+    NOT_FILE_H,
+    RANK_1,
+    RANK_2,
+    RANK_7,
+    RANK_8,
+    Color,
+    PieceType,
+)
+from ._generated import STARTPOS_FEN as STARTPOS_FEN
+
 
 class Square(IntEnum):
     """
@@ -92,30 +113,7 @@ class Square(IntEnum):
     H8 = auto()
 
 
-class Color(IntEnum):
-    WHITE = 0
-    BLACK = 1
-
-    def opponent(self) -> "Color":
-        return Color(1 - self.value)
-
-
-class PieceType(IntEnum):
-    PAWN = 0
-    KNIGHT = 1
-    BISHOP = 2
-    ROOK = 3
-    QUEEN = 4
-    KING = 5
-
-
 U64 = int  # Type alias for readability
-
-# ── Castling rights bitmask ─────────────────────────────────────────────────
-CR_WK = 0b1000
-CR_WQ = 0b0100
-CR_BK = 0b0010
-CR_BQ = 0b0001
 
 # ── FEN piece characters ────────────────────────────────────────────────────
 _PIECE_TO_FEN: dict[PieceType, str] = {
@@ -127,26 +125,6 @@ _PIECE_TO_FEN: dict[PieceType, str] = {
     PieceType.KING: "k",
 }
 _FEN_TO_PIECE: dict[str, PieceType] = {v: k for k, v in _PIECE_TO_FEN.items()}
-
-STARTPOS_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
-
-# ── Board constants ─────────────────────────────────────────────────────────
-FULL_BOARD: U64 = 0xFFFFFFFFFFFFFFFF
-
-FILE_A: U64 = 0x0101010101010101
-FILE_H: U64 = 0x8080808080808080
-FILE_AB: U64 = FILE_A | (FILE_A << 1)
-FILE_GH: U64 = FILE_H | (FILE_H >> 1)
-
-NOT_FILE_A: U64 = FULL_BOARD ^ FILE_A
-NOT_FILE_H: U64 = FULL_BOARD ^ FILE_H
-NOT_FILE_AB: U64 = FULL_BOARD ^ FILE_AB
-NOT_FILE_GH: U64 = FULL_BOARD ^ FILE_GH
-
-RANK_1: U64 = 0x00000000000000FF
-RANK_2: U64 = 0x000000000000FF00
-RANK_7: U64 = 0x00FF000000000000
-RANK_8: U64 = 0xFF00000000000000
 
 # ── Square / bits conversion ────────────────────────────────────────────────
 

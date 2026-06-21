@@ -4,6 +4,7 @@
 
 pub mod board;
 pub mod evaluate;
+pub mod generated;
 pub mod search;
 pub mod tt;
 pub mod types;

@@ -7,9 +7,7 @@
 #include <cstddef>
 #include <vector>
 
-#include "types.hpp"
-
-enum class TTFlag { EXACT = 0, LOWER = 1, UPPER = 2 };
+#include "types.hpp"  // TTFlag (enum class) comes from generated.hpp via this include
 
 struct TTEntry {
     U64 key = 0;

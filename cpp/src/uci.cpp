@@ -21,9 +21,7 @@ namespace {
 const char *ENGINE_NAME = "Eschess-cpp";
 const char *ENGINE_AUTHOR = "Kane Weng";
 
-constexpr double MATE_THRESHOLD = 8000.0;
-constexpr double TIME_SAFETY = 0.85;
-constexpr double MOVE_OVERHEAD_MS = 20.0;
+// MATE_THRESHOLD / TIME_SAFETY / MOVE_OVERHEAD_MS come from generated.hpp (via search.hpp).
 
 double apply_margin(double budget_ms) {
     return std::max(10.0, budget_ms * TIME_SAFETY - MOVE_OVERHEAD_MS);

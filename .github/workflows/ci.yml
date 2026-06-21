@@ -71,7 +71,13 @@ jobs:
       - name: Build FFI & sync Python environment
         run: uv sync --extra ffi
 
-      # 8. The real cross-language guard: perft, board->planes encoding parity vs
+      # 8. Prove the generated constant files (python/cpp/rust) still match the
+      #    single source of truth in schema/engine.toml — fails if anyone edited
+      #    the schema or a generated file without re-running schema/codegen.py.
+      - name: Check generated files match the schema
+        run: uv run python schema/codegen.py --check
+
+      # 9. The real cross-language guard: perft, board->planes encoding parity vs
       #    python/nn/encoding.py, move-gen/FEN/Zobrist parity, self-play determinism.
       - name: Run parity tests
         run: uv run --extra ffi pytest tests/

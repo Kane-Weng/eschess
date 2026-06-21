@@ -13,9 +13,7 @@
 #include "evaluate.hpp"
 #include "tt.hpp"
 
-constexpr int MAX_PLY = 64;
-constexpr int MAX_HISTORY = 16384;
-constexpr int QS_DEPTH = 8;
+// MAX_PLY / MAX_HISTORY / QS_DEPTH come from generated.hpp (via board.hpp -> types.hpp).
 
 // One root move's full-window analysis (for the GUI's MultiPV / density overlays).
 struct RootAnalysis {

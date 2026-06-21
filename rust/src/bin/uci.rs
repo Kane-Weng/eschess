@@ -8,15 +8,12 @@ use std::io::{self, BufRead, Write};
 
 use eschess::board::{CBoard, STARTPOS_FEN};
 use eschess::evaluate::make_evaluator;
+use eschess::generated::{MATE_THRESHOLD, MOVE_OVERHEAD_MS, TIME_SAFETY};
 use eschess::search::{Search, MAX_PLY};
 use eschess::types::*;
 
 const ENGINE_NAME: &str = "Eschess-rust";
 const ENGINE_AUTHOR: &str = "Kane Weng";
-
-const MATE_THRESHOLD: f64 = 8000.0;
-const TIME_SAFETY: f64 = 0.85;
-const MOVE_OVERHEAD_MS: f64 = 20.0;
 
 fn apply_margin(budget_ms: f64) -> f64 {
     (budget_ms * TIME_SAFETY - MOVE_OVERHEAD_MS).max(10.0)

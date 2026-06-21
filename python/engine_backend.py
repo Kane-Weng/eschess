@@ -137,7 +137,7 @@ class UCIBackend:
     def stop(self) -> None:
         """Ask the engine to stop searching now and emit its best move so far."""
         try:
-            self._send("stop")  
+            self._send("stop")
         except Exception:
             pass
 

@@ -6,9 +6,7 @@
 #include <utility>
 #include <vector>
 
-#include "types.hpp"
-
-extern const char *STARTPOS_FEN;
+#include "types.hpp"  // STARTPOS_FEN comes from generated.hpp via this include
 
 struct Piece {
     int color;

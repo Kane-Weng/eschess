@@ -8,8 +8,6 @@
 
 #include "zobrist.hpp"
 
-const char *STARTPOS_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-
 static const char PIECE_TO_FEN[6] = {'p', 'n', 'b', 'r', 'q', 'k'};
 
 static int fen_to_piece(char c) {

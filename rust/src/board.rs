@@ -5,8 +5,8 @@
 use crate::types::*;
 use crate::zobrist;
 
-// pub is akin to constexpr (compiled time constants)
-pub const STARTPOS_FEN: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+// STARTPOS_FEN comes from the shared schema; re-export so `eschess::board::STARTPOS_FEN` holds.
+pub use crate::generated::STARTPOS_FEN;
 
 // Array syntax specifies [Type; Size]; b'p' (byte literals) directly evaluates char ASCII as a u8
 const PIECE_TO_FEN: [u8; 6] = [b'p', b'n', b'b', b'r', b'q', b'k'];

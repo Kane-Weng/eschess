@@ -52,7 +52,7 @@ WIDTH = BOARD_PX
 HEIGHT = BOARD_PX + STATUS_H
 FPS = 60
 
-PLAYER_COLOR = Color.WHITE  
+PLAYER_COLOR = Color.WHITE
 BOT_COLOR = Color.BLACK
 BOT_DEPTH = 3
 FLIPPED = False
@@ -855,7 +855,11 @@ def main(args):
             draw_game_over(screen, board)
 
         draw_status(
-            screen, board, bot["thinking"], status_note, player_color,
+            screen,
+            board,
+            bot["thinking"],
+            status_note,
+            player_color,
             analyzing=bot["thinking"] and not bot["apply"],
         )
 

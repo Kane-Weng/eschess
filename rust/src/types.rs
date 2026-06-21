@@ -4,45 +4,20 @@
 
 pub type U64 = u64;
 
-pub const WHITE: usize = 0;
-pub const BLACK: usize = 1;
+// Enums, sentinels, castle bits and bitboard masks come from the shared schema
+// (schema/engine.toml -> generated.rs); re-exported here so that the crate's
+// pervasive `use crate::types::*` keeps resolving these names.
+pub use crate::generated::{
+    BISHOP, BLACK, CR_BK, CR_BQ, CR_WK, CR_WQ, FILE_A, FILE_AB, FILE_GH, FILE_H, FULL_BOARD, KING,
+    KNIGHT, NOT_FILE_A, NOT_FILE_AB, NOT_FILE_GH, NOT_FILE_H, NO_PIECE, PAWN, QUEEN, RANK_1,
+    RANK_2, RANK_7, RANK_8, ROOK, WHITE,
+};
 
+// `opponent` is behavior (not data), so it stays here.
 #[inline]
 pub fn opponent(c: usize) -> usize {
     1 - c
 }
-
-// Piece types: PAWN..KING == 0..5. NO_PIECE uses a sentinel index.
-pub const PAWN: usize = 0;
-pub const KNIGHT: usize = 1;
-pub const BISHOP: usize = 2;
-pub const ROOK: usize = 3;
-pub const QUEEN: usize = 4;
-pub const KING: usize = 5;
-pub const NO_PIECE: i32 = -1;
-
-// Castling-rights bitmask (matches CR_* in board.py).
-pub const CR_WK: i32 = 0b1000;
-pub const CR_WQ: i32 = 0b0100;
-pub const CR_BK: i32 = 0b0010;
-pub const CR_BQ: i32 = 0b0001;
-
-pub const FULL_BOARD: U64 = 0xFFFF_FFFF_FFFF_FFFF;
-
-pub const FILE_A: U64 = 0x0101_0101_0101_0101;
-pub const FILE_H: U64 = 0x8080_8080_8080_8080;
-pub const FILE_AB: U64 = FILE_A | (FILE_A << 1);
-pub const FILE_GH: U64 = FILE_H | (FILE_H >> 1);
-
-pub const NOT_FILE_A: U64 = FULL_BOARD ^ FILE_A;
-pub const NOT_FILE_H: U64 = FULL_BOARD ^ FILE_H;
-pub const NOT_FILE_AB: U64 = FULL_BOARD ^ FILE_AB;
-pub const NOT_FILE_GH: U64 = FULL_BOARD ^ FILE_GH;
-
-pub const RANK_1: U64 = 0x0000_0000_0000_00FF;
-pub const RANK_2: U64 = 0x0000_0000_0000_FF00;
-pub const RANK_7: U64 = 0x00FF_0000_0000_0000;
-pub const RANK_8: U64 = 0xFF00_0000_0000_0000;
 
 #[inline]
 pub fn square_to_bits(square: i32) -> U64 {

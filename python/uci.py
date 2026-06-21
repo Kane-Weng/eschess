@@ -27,22 +27,17 @@ Run:  python3 uci.py     (or: uv run python uci.py)
 import argparse
 import sys
 
+from engine._generated import MATE_THRESHOLD, MOVE_OVERHEAD_MS, TIME_SAFETY
 from engine.board import STARTPOS_FEN, CBoard, Color, PieceType, name_to_square, square_name
 from engine_backend import make_engine
 
 ENGINE_NAME = "Eschess"
 ENGINE_AUTHOR = "Kane Weng"
 
-# Score sentinel: the search returns ±(9000 + depth) pawn-units for forced mate.
-_MATE_THRESHOLD = 8_000
-
-_TIME_SAFETY = 0.85
-_MOVE_OVERHEAD_MS = 20.0
-
 
 def _apply_margin(budget_ms: float) -> float:
     """Shrink a nominal time budget to leave room for overshoot + I/O overhead."""
-    return max(10.0, budget_ms * _TIME_SAFETY - _MOVE_OVERHEAD_MS)
+    return max(10.0, budget_ms * TIME_SAFETY - MOVE_OVERHEAD_MS)
 
 
 _PROMO_TO_CHAR = {
@@ -81,7 +76,7 @@ def _score_to_uci(score: float, white_to_move: bool, pv_len: int = 0) -> str:
     encodes remaining depth, not distance to mate).
     """
     stm = score if white_to_move else -score
-    if abs(stm) >= _MATE_THRESHOLD:
+    if abs(stm) >= MATE_THRESHOLD:
         moves = (pv_len + 1) // 2 if pv_len else 1
         return f"mate {moves if stm > 0 else -moves}"
     return f"cp {round(stm * 100)}"

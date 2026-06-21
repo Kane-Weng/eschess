@@ -14,25 +14,22 @@ Alpha-beta minimax search with:
 import time
 from collections.abc import Callable
 
+from ._generated import (
+    CP,
+    MAX_HISTORY,
+    MAX_PLY,
+    ORDER_CAPTURE_BASE,
+    ORDER_KILLER1,
+    ORDER_KILLER2,
+    ORDER_PROMO,
+    ORDER_QUEEN_PROMO,
+    ORDER_TT_MOVE,
+    PROMO_PIECES,
+    QS_DEPTH,
+)
 from .board import CBoard, Color, PieceType, bits_to_squares
 from .evaluate import BaseEvaluate, MediumEvaluate
 from .transposition import TranspositionTable, TTFlag
-
-PROMO_PIECES = [PieceType.QUEEN, PieceType.ROOK, PieceType.BISHOP, PieceType.KNIGHT]
-
-_MAX_PLY = 64
-_MAX_HISTORY = 16_384  # gravity ceiling; scores are bounded to [-MAX, +MAX]
-_QS_DEPTH = 8  # quiescence safety limit
-
-# Centipawn values for MVV-LVA ordering
-_CP = {
-    PieceType.PAWN: 100,
-    PieceType.KNIGHT: 320,
-    PieceType.BISHOP: 330,
-    PieceType.ROOK: 500,
-    PieceType.QUEEN: 900,
-    PieceType.KING: 0,
-}
 
 Move = tuple[int, int, PieceType | None]  # (from_square, to_square, promotion)
 
@@ -64,7 +61,7 @@ class Search:
     def __init__(self, evaluator: BaseEvaluate | None = None, tt_size_mb: int = 32):
         self._evaluate = evaluator or MediumEvaluate()
         self._tt = TranspositionTable(tt_size_mb)
-        self._killers: list[list[Move | None]] = [[None, None] for _ in range(_MAX_PLY)]
+        self._killers: list[list[Move | None]] = [[None, None] for _ in range(MAX_PLY)]
         self._history: list[list[list[int]]] = [[[0] * 64 for _ in range(64)] for _ in range(2)]
         self._nodes: int = 0
         self._deadline: float | None = None
@@ -87,7 +84,7 @@ class Search:
 
     def new_game(self) -> None:
         """Reset search state between games (TT persists for transposition reuse)."""
-        self._killers = [[None, None] for _ in range(_MAX_PLY)]
+        self._killers = [[None, None] for _ in range(MAX_PLY)]
         self._history = [[[0] * 64 for _ in range(64)] for _ in range(2)]
 
     # ── History helpers ──────────────────────────────────────────────────────
@@ -97,10 +94,10 @@ class Search:
         Gravity formula: pulls score toward the bonus without overflow.
         The -current * |bonus| / MAX term shrinks updates as score approaches the ceiling.
         """
-        bonus = min(depth * depth, _MAX_HISTORY)
-        clamped = max(-_MAX_HISTORY, min(_MAX_HISTORY, bonus))
+        bonus = min(depth * depth, MAX_HISTORY)
+        clamped = max(-MAX_HISTORY, min(MAX_HISTORY, bonus))
         cur = self._history[color][from_square][to_square]
-        self._history[color][from_square][to_square] += clamped - cur * abs(clamped) // _MAX_HISTORY
+        self._history[color][from_square][to_square] += clamped - cur * abs(clamped) // MAX_HISTORY
 
     def _age_history(self) -> None:
         """Halve all history scores so recent cutoffs outweigh stale ones."""
@@ -110,26 +107,26 @@ class Search:
 
     def _order_key(self, board: CBoard, move: Move, ply: int, tt_move: Move | None) -> int:
         if move == tt_move:
-            return 20_000
+            return ORDER_TT_MOVE
 
         from_square, to_square, promotion = move
 
         if promotion == PieceType.QUEEN:
-            return 10_000
+            return ORDER_QUEEN_PROMO
         if promotion is not None:
-            return 9_000
+            return ORDER_PROMO
 
         captured = board.get_piece_at(to_square)
         if captured is not None:
             aggressor = board.get_piece_at(from_square)
-            agg_val = _CP.get(aggressor[1], 0) if aggressor else 0
-            return 5_000 + _CP.get(captured[1], 0) * 10 - agg_val
+            agg_val = CP.get(aggressor[1], 0) if aggressor else 0
+            return ORDER_CAPTURE_BASE + CP.get(captured[1], 0) * 10 - agg_val
 
         # Quiet move: killers then history
         if self._killers[ply][0] == move:
-            return 4_000
+            return ORDER_KILLER1
         if self._killers[ply][1] == move:
-            return 3_000
+            return ORDER_KILLER2
         return self._history[board.turn.value][from_square][to_square]
 
     # ── Quiescence search ────────────────────────────────────────────────────
@@ -162,15 +159,13 @@ class Search:
             if stand_pat < beta:
                 beta = stand_pat
 
-        if qdepth >= _QS_DEPTH:  # safety valve against tactical explosions
+        if qdepth >= QS_DEPTH:  # safety valve against tactical explosions
             return stand_pat
 
         captures = _flat_moves(board, captures_only=True)  # filters out all quiet moves.
         # MVV: order by value of captured piece (no LVA needed in QS)
         captures.sort(
-            key=lambda m: (
-                _CP.get(board.get_piece_at(m[1])[1], 0) if board.get_piece_at(m[1]) else 0
-            ),
+            key=lambda m: CP.get(board.get_piece_at(m[1])[1], 0) if board.get_piece_at(m[1]) else 0,
             reverse=True,
         )
 
@@ -284,7 +279,7 @@ class Search:
                 beta = min(beta, best_eval)
 
             if beta <= alpha:
-                if is_quiet and ply < _MAX_PLY:
+                if is_quiet and ply < MAX_PLY:
                     if self._killers[ply][0] != move:
                         self._killers[ply][1] = self._killers[ply][0]
                         self._killers[ply][0] = move
@@ -334,7 +329,7 @@ class Search:
                 "effort": {},
                 "stm_white": white,
             }
-            # telemetry is refreshed after each completed depth with 
+            # telemetry is refreshed after each completed depth with
             # the ranked top lines and per-move effort
             if want_multi and self._root_info:
                 ranked = sorted(self._root_info, key=lambda r: r[1], reverse=white)
@@ -379,7 +374,7 @@ class Search:
                 return (from_square, to_square, promo)
         return None
 
-    def _extract_pv(self, board: CBoard, max_len: int = _MAX_PLY) -> list[Move]:
+    def _extract_pv(self, board: CBoard, max_len: int = MAX_PLY) -> list[Move]:
         """Walk the TT from the root to recover the principal variation."""
         pv: list[Move] = []
         seen: set[int] = set()
@@ -404,7 +399,7 @@ class Search:
     def search_position(
         self,
         board: CBoard,
-        max_depth: int = _MAX_PLY,
+        max_depth: int = MAX_PLY,
         time_limit_ms: float | None = None,
         info_callback: "Callable[[int, float, int, float, list[Move]], None] | None" = None,
     ) -> tuple[Move | None, float]:
@@ -415,7 +410,7 @@ class Search:
         perspective. info_callback(depth, score, nodes, elapsed_s, pv) is
         invoked after each completed depth (for UCI info output).
         """
-        self._killers = [[None, None] for _ in range(_MAX_PLY)]
+        self._killers = [[None, None] for _ in range(MAX_PLY)]
         self._age_history()  # decay stale scores before each new search
         self._nodes = 0
         self._stop = False
