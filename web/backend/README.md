@@ -1,23 +1,39 @@
 # Eschess Web Backend
 
-FastAPI + WebSocket server for the Python / ML engine behind the Engine Sandbox.
+FastAPI + WebSocket server for the Python / C++ / Rust engines behind the Engine
+Sandbox.
 
-The Engine Sandbox already runs a TypeScript port of the alpha-beta engine
+The Engine Sandbox runs a TypeScript port of the alpha-beta engine
 **client-side** (see `web/frontend/src/lib/engine/`), so the static site works
-with no server. This backend is the path for the heavier engine that cannot run
-in the browser: the value and policy neural networks. It reuses the existing
-engine in [`python/`](../../python) directly rather than reimplementing it.
+with no server (the "JS" language tab). This backend serves the other three
+ports, which cannot run in the browser:
+
+- `py` - the in-process Python reference engine ([`python/`](../../python)).
+- `cpp` / `rust` - the compiled UCI binaries, driven as subprocesses via
+  `engine_backend.make_engine` (no reimplementation).
+
+It is also the path for the heavier value / policy neural networks (still TODO).
 
 ## Run
 
 ```bash
-cd web/backend
-pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
+# from the repo root (uv reads the root pyproject.toml / uv.lock)
+uv sync --extra web
+uv run --extra web uvicorn app.main:app --reload --port 8123 --app-dir web/backend
 ```
 
-`GET /health` returns a readiness probe. The engine lives at the WebSocket
-endpoint `/ws/engine`.
+Port 8123 matches the frontend's default WebSocket URL. To use a different port,
+start uvicorn there and point the frontend at it with
+`PUBLIC_ENGINE_WS=ws://localhost:<port>/ws/engine` at build time.
+
+`GET /health` returns a readiness probe plus which language ports are available
+(`cpp` / `rust` need their UCI binary compiled, see the repo `CLAUDE.md`):
+
+```jsonc
+{ "status": "ok", "langs": { "py": true, "cpp": true, "rust": false } }
+```
+
+The engine lives at the WebSocket endpoint `/ws/engine`.
 
 ## Wire format
 
@@ -27,7 +43,8 @@ server are interchangeable:
 
 ```jsonc
 // client -> server
-{ "fen": "rnbqkbnr/...", "depth": 3, "eval": "medium", "multipv": 1 }
+{ "lang": "py", "fen": "rnbqkbnr/...", "depth": 3, "eval": "medium", "multipv": 1 }
+// lang: "py" | "cpp" | "rust" (default "py"). "js" runs client-side, never here.
 
 // server -> client
 {
@@ -44,11 +61,13 @@ server are interchangeable:
 
 `eval` accepts `simple | medium | complex`. Wiring `nn` (value network) and a
 `policy` search is the next step; both already exist in `engine_backend.make_engine`
-and need the trained weights under `python/nn/weights/` plus the engine's Python
-dependencies (numpy, torch).
+and need the trained weights under `python/nn/weights/` plus the engine's NN deps
+(`uv sync --extra web --extra nn` pulls numpy + torch).
 
 ## Status
 
-Stub: alpha-beta over the three handcrafted eval tiers works end to end. The
-frontend does not yet connect to it (it uses the client-side engine); switching
-the sandbox's "Python" language tab to this socket is the follow-up.
+Working: the sandbox's Python / C++ / Rust language tabs drive this socket
+(alpha-beta over the three handcrafted eval tiers), with JS still running
+in-browser. The server returns a single final frame per request, so the search
+animation stays JS-only. Remaining: the `nn` value eval and `policy` move source
+(both wired in `make_engine`, pending weights + torch).

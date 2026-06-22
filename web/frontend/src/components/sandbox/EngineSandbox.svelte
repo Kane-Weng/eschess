@@ -5,9 +5,11 @@
   // overlays (PV / Top-3 / Density), a captured-piece tray, and an undo/redo
   // move list. The engine itself lives in src/lib/engine (a port of the Python
   // alpha-beta search + evaluators).
-  import { tick } from "svelte";
+  import { onDestroy, tick } from "svelte";
   import { Chess } from "chess.js";
   import { Engine } from "../../lib/engine/search";
+  import { RemoteEngine } from "../../lib/engine/remote";
+  import type { RemoteLang } from "../../lib/engine/remote";
   import type { EvalLevel } from "../../lib/engine/evaluate";
   import type { EngineInfo, EngineMove, PieceSymbol } from "../../lib/engine/types";
   import { EMPTY_INFO } from "../../lib/engine/types";
@@ -15,6 +17,7 @@
   import EvalBar from "./EvalBar.svelte";
 
   type Viz = "off" | "pv" | "top3" | "density";
+  type Lang = "js" | RemoteLang;
   const PLAYER: "w" = "w";
 
   // ── Game state ───────────────────────────────────────────────────────────────
@@ -31,12 +34,16 @@
   let result = $state("");
 
   // ── Engine + telemetry ───────────────────────────────────────────────────────
+  // 'js' runs in-browser; 'py' / 'cpp' / 'rust' run server-side over a socket.
   const engine = new Engine();
+  const remote = new RemoteEngine();
   let info = $state<EngineInfo>(EMPTY_INFO);
   let botThinking = $state(false);
   let engineToken = 0;
+  let engineError = $state<string | null>(null);
 
   // ── Settings ─────────────────────────────────────────────────────────────────
+  let lang = $state<Lang>("js");
   let evalLevel = $state<EvalLevel>("medium");
   let depth = $state(3);
   let vizMode = $state<Viz>("pv");
@@ -47,7 +54,7 @@
   let helpKey = $state<string | null>(null);
   const HELP: Record<string, string> = {
     settings:
-      "The engine runs entirely in your browser, a TypeScript port of the Python alpha-beta search. The C++/Rust (WASM) and Python (WebSocket) backends are planned, so those tabs are disabled. A higher depth and the complex evaluation play stronger but think a little longer.",
+      "JS runs entirely in your browser, a TypeScript port of the Python alpha-beta search. C++, Rust and Python run server-side over a WebSocket (start the backend with uvicorn on :8123); they return a single final frame, so the search animation is JS-only. A higher depth and the complex evaluation play stronger but think a little longer.",
     viz: "While the engine (Black) searches for its move, the overlay replays its thinking: candidate lines appear and re-rank, and the best line switches as deeper refutations surface. PV shows the single expected line; Top 3 ranks the best root moves (green, gold, red) with centipawn labels; Density rings each square by how many search nodes were spent there.",
     perf: "Nodes is positions searched. NPS is nodes per second. Depth is the plies the search reached. Think time is how long the last search ran.",
   };
@@ -97,12 +104,19 @@
     const my = ++engineToken;
     botThinking = true;
     engine.level = evalLevel;
+    engineError = null;
     // Clear the previous overlay but keep the score so the eval bar does not flash.
     info = { ...EMPTY_INFO, score: info.score, stmWhite: false };
     const fen = game.fen();
     await tick();
     await raf();
     if (my !== engineToken) return;
+
+    // Server-side ports: one final frame, no streamed search animation.
+    if (lang !== "js") {
+      await remoteMove(my, fen);
+      return;
+    }
 
     if (vizMode === "off") {
       const { bestMove, info: ni } = engine.search(fen, depth, 1500);
@@ -132,6 +146,34 @@
     if (bestMove) {
       pushMove(bestMove);
       afterPosition();
+    }
+  }
+
+  // Server-side ports (py/cpp/rust) reached over the WebSocket backend. The
+  // server returns a single final frame, so there is no per-node animation; with
+  // a visualization on we just hold the final PV / Top-3 / density a beat.
+  async function remoteMove(my: number, fen: string) {
+    try {
+      const { bestMove, info: ni } = await remote.analyze({
+        lang: lang as RemoteLang,
+        fen,
+        depth,
+        eval: evalLevel,
+        multipv: vizMode === "off" ? 1 : 3,
+      });
+      if (my !== engineToken) return;
+      info = ni;
+      if (vizMode !== "off") await wait(650); // let the overlay register before moving
+      if (my !== engineToken) return;
+      botThinking = false;
+      if (bestMove) {
+        pushMove(bestMove);
+        afterPosition();
+      }
+    } catch (e) {
+      if (my !== engineToken) return;
+      engineError = e instanceof Error ? e.message : String(e);
+      botThinking = false;
     }
   }
 
@@ -235,13 +277,22 @@
     result = "";
     info = EMPTY_INFO;
     botThinking = false;
+    engineError = null;
     sync();
   }
+
+  onDestroy(() => remote.close());
 
   // ── Setting handlers ─────────────────────────────────────────────────────────
   // Settings take effect on the engine's next move. While it is mid-animation the
   // overlay reads vizMode live, so switching visualization re-renders the current
   // frame immediately (each frame carries pv + multipv + effort).
+  // Takes effect on the engine's next move (like eval/depth). 'js' is in-browser;
+  // the others need the backend running (uvicorn on :8123).
+  function setLang(id: Lang) {
+    lang = id;
+    engineError = null;
+  }
   function setEval(level: EvalLevel) {
     evalLevel = level;
   }
@@ -335,11 +386,11 @@
     { id: "top3", label: "Top 3" },
     { id: "density", label: "Density" },
   ];
-  const LANGS = [
-    { id: "js", label: "JS", on: true },
-    { id: "cpp", label: "C++", on: false },
-    { id: "rust", label: "Rust", on: false },
-    { id: "py", label: "Python", on: false },
+  const LANGS: { id: Lang; label: string; hint: string }[] = [
+    { id: "js", label: "JS", hint: "In-browser TypeScript engine" },
+    { id: "cpp", label: "C++", hint: "Compiled C++ port (backend)" },
+    { id: "rust", label: "Rust", hint: "Compiled Rust port (backend)" },
+    { id: "py", label: "Python", hint: "Python reference engine (backend)" },
   ];
   const fmt = (n: number) => n.toLocaleString("en-US");
 </script>
@@ -442,13 +493,17 @@
           <button
             type="button"
             class="seg-btn"
-            class:seg-on={l.id === "js"}
-            disabled={!l.on}
-            title={l.on ? "In-browser TypeScript engine" : "Planned (WASM / WebSocket backend)"}
-            >{l.label}</button
+            class:seg-on={lang === l.id}
+            title={l.hint}
+            onclick={() => setLang(l.id)}>{l.label}</button
           >
         {/each}
       </div>
+      {#if lang !== "js"}
+        <p class="lang-note" class:lang-err={engineError}>
+          {engineError ?? "Runs on the backend (uvicorn :8123)."}
+        </p>
+      {/if}
       <p class="panel-label mt-3">Move source</p>
       <div class="seg">
         <button type="button" class="seg-btn seg-on">alpha-beta</button>
@@ -554,6 +609,15 @@
     margin-bottom: 0.35rem;
     font-size: 0.75rem;
     color: #8b8b94;
+  }
+  .lang-note {
+    margin-top: 0.4rem;
+    font-size: 0.7rem;
+    line-height: 1.4;
+    color: #8b8b94;
+  }
+  .lang-err {
+    color: #e0a0a0;
   }
   .help-btn {
     display: inline-flex;

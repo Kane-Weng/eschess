@@ -12,10 +12,9 @@ and the same telemetry the in-browser engine produces (nodes / NPS / score /
 depth / PV / MultiPV / per-move effort), so the two backends are interchangeable
 behind one wire format.
 
-Run:
-    cd web/backend
-    pip install -r requirements.txt
-    uvicorn app.main:app --reload --port 8000
+Run (from the repo root; uv reads the root pyproject.toml / uv.lock):
+    uv sync --extra web
+    uv run --extra web uvicorn app.main:app --reload --port 8123 --app-dir web/backend
 
 Wire format (JSON over the /ws/engine socket):
     client -> {"fen": "...", "depth": 3, "eval": "medium", "multipv": 1}
@@ -38,7 +37,9 @@ if str(_PYTHON_DIR) not in sys.path:
     sys.path.insert(0, str(_PYTHON_DIR))
 
 from engine.board import CBoard, Color, PieceType, square_name  # noqa: E402
-from engine_backend import make_engine  # noqa: E402
+from engine_backend import cpp_available, make_engine, rust_available  # noqa: E402
+
+_LANGS = {"py", "cpp", "rust"}
 
 _PROMO_CHAR = {
     PieceType.KNIGHT: "n",
@@ -98,20 +99,30 @@ def _serialize_info(info: dict, stm_white: bool) -> dict:
 
 
 class EngineSession:
-    """One alpha-beta engine per connection; rebuilt when the eval tier changes."""
+    """One engine per connection; rebuilt when the language or eval tier changes.
+
+    'py' is the in-process Python search; 'cpp'/'rust' drive the compiled UCI
+    binaries over a subprocess (see engine_backend.make_engine).
+    """
 
     def __init__(self) -> None:
         self._engine = None
+        self._lang = None
         self._eval = None
 
-    def _ensure(self, evaluator: str):
-        if self._engine is None or evaluator != self._eval:
-            self._engine = make_engine(lang="py", search="alphabeta", evaluator=evaluator)
-            self._eval = evaluator
+    def _ensure(self, lang: str, evaluator: str):
+        if self._engine is None or lang != self._lang or evaluator != self._eval:
+            # Build the new engine before closing the old one: a failed build
+            # (e.g. missing cpp/rust binary) must not strand the session.
+            engine = make_engine(lang=lang, search="alphabeta", evaluator=evaluator)
+            self.close()
+            self._engine, self._lang, self._eval = engine, lang, evaluator
         return self._engine
 
-    def analyze(self, fen: str, depth: int, evaluator: str, multipv: int) -> dict:
-        engine = self._ensure(evaluator)
+    def analyze(self, lang: str, fen: str, depth: int, evaluator: str, multipv: int) -> dict:
+        if lang not in _LANGS:
+            raise ValueError(f"unknown language {lang!r} (expected one of {sorted(_LANGS)})")
+        engine = self._ensure(lang, evaluator)
         engine.set_multipv(max(1, multipv))
         board = CBoard.from_fen(fen)
         stm_white = board.turn == Color.WHITE
@@ -121,10 +132,19 @@ class EngineSession:
         info.setdefault("time_s", time.time() - start)
         return {"bestmove": _move_to_uci(best), "info": _serialize_info(info, stm_white)}
 
+    def close(self) -> None:
+        # UCI subprocesses (cpp/rust) hold an OS process; release it on switch/disconnect.
+        if self._engine is not None and hasattr(self._engine, "close"):
+            self._engine.close()
+
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "engine": "python alpha-beta"}
+    # 'py' is always available; cpp/rust need their UCI binary compiled.
+    return {
+        "status": "ok",
+        "langs": {"py": True, "cpp": cpp_available(), "rust": rust_available()},
+    }
 
 
 @app.websocket("/ws/engine")
@@ -134,15 +154,18 @@ async def ws_engine(ws: WebSocket) -> None:
     try:
         while True:
             req = await ws.receive_json()
+            lang = req.get("lang", "py")
             fen = req.get("fen", CBoard().to_fen())
             depth = int(req.get("depth", 3))
             evaluator = req.get("eval", "medium")
             multipv = int(req.get("multipv", 1))
             try:
-                result = session.analyze(fen, depth, evaluator, multipv)
-            except Exception as exc:  # malformed FEN, etc.
+                result = session.analyze(lang, fen, depth, evaluator, multipv)
+            except Exception as exc:  # malformed FEN, missing binary, etc.
                 await ws.send_json({"error": str(exc)})
                 continue
             await ws.send_json(result)
     except WebSocketDisconnect:
         return
+    finally:
+        session.close()

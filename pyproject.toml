@@ -18,9 +18,14 @@ nn = [
 bench = [
     "matplotlib>=3.7",
 ]
-# Native Rust/PyO3 engine + parallel self-play (rust-ffi). 
+# Native Rust/PyO3 engine + parallel self-play (rust-ffi).
 ffi = [
     "eschess-native",
+]
+# Web backend (web/backend): FastAPI + WebSocket server fronting the Python engine.
+web = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
 ]
 
 [tool.uv.sources]

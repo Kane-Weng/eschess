@@ -1,6 +1,0 @@
-# Eschess web backend (FastAPI + WebSocket engine server).
-# The engine itself lives in ../../python and is imported at runtime, so this
-# pins only the web server. Install the Python engine's own deps (numpy, torch,
-# ...) from python/ if you intend to serve the 'nn' eval / policy search.
-fastapi>=0.110
-uvicorn[standard]>=0.29
