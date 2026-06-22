@@ -21,6 +21,7 @@ Run as a module from the python/ directory:
 import argparse
 import copy
 import csv
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
@@ -34,6 +35,7 @@ from engine_backend import _WEIGHTS_DIR, _latest_weights
 
 from .encoding import POLICY_SIZE
 from .mcts import MCTS, select_move
+from .metrics import MetricsWriter
 from .native import HAS_NATIVE, NativeSelfPlay
 from .network import PolicyNet, ValueNet
 from .selfplay import SelfPlaySample, game_outcome, play_game
@@ -70,7 +72,13 @@ class SelfPlayDataset(Dataset):
 
 
 def train_policy_soft(
-    net: PolicyNet, dataset: SelfPlayDataset, epochs: int, batch_size: int, lr: float, device: str
+    net: PolicyNet,
+    dataset: SelfPlayDataset,
+    epochs: int,
+    batch_size: int,
+    lr: float,
+    device: str,
+    on_epoch: Callable[[int, float], None] | None = None,
 ) -> float:
     """Soft cross-entropy to the MCTS visit distribution. Returns last-epoch loss."""
     net = net.to(device).train()
@@ -90,12 +98,20 @@ def train_policy_soft(
             total += loss.item() * planes.size(0)
         last = total / len(dataset)
         print(f"[rl/policy] epoch {epoch + 1}/{epochs}  loss {last:.4f}", flush=True)
+        if on_epoch is not None:
+            on_epoch(epoch + 1, last)
     net.eval()
     return last
 
 
 def train_value(
-    net: ValueNet, dataset: SelfPlayDataset, epochs: int, batch_size: int, lr: float, device: str
+    net: ValueNet,
+    dataset: SelfPlayDataset,
+    epochs: int,
+    batch_size: int,
+    lr: float,
+    device: str,
+    on_epoch: Callable[[int, float], None] | None = None,
 ) -> float:
     """MSE to the game result (White perspective). Returns last-epoch loss."""
     net = net.to(device).train()
@@ -115,6 +131,8 @@ def train_value(
             total += loss.item() * planes.size(0)
         last = total / len(dataset)
         print(f"[rl/value]  epoch {epoch + 1}/{epochs}  loss {last:.4f}", flush=True)
+        if on_epoch is not None:
+            on_epoch(epoch + 1, last)
     net.eval()
     return last
 
@@ -164,6 +182,14 @@ def evaluate_gate(
 # -- Orchestration -----------------------------------------------------------
 
 
+def _wdl(game_results: list[float]) -> tuple[int, int, int]:
+    """Count White-perspective win / draw / loss from per-game results."""
+    wins = sum(1 for r in game_results if r > 0)
+    losses = sum(1 for r in game_results if r < 0)
+    draws = len(game_results) - wins - losses
+    return wins, draws, losses
+
+
 def _resolve_backend(backend: str) -> bool:
     """Return True to use the native self-play engine, False for pure Python."""
     if backend == "python":
@@ -209,6 +235,25 @@ def run_rl(args: argparse.Namespace) -> None:
             ["generation", "samples", "policy_loss", "value_loss", "gate_score", "accepted"]
         )
 
+    # Optional live metrics sink. Default sits next to the CSV so the web
+    # dashboard can list/tail it; --metrics-stream overrides the path.
+    metrics_path = (
+        Path(args.metrics_stream)
+        if args.metrics_stream
+        else (_RESULTS_DIR / f"{stamp}_rl_training.jsonl")
+    )
+    metrics = MetricsWriter(metrics_path)
+    metrics.emit(
+        {
+            "type": "run",
+            "stamp": stamp,
+            "generations": args.generations,
+            "games_per_gen": args.games_per_gen,
+            "sims": args.sims,
+            "backend": "native" if use_native else "python",
+        }
+    )
+
     buffer: list[list[SelfPlaySample]] = []
     for generation in range(1, args.generations + 1):
         if use_native:
@@ -225,20 +270,24 @@ def run_rl(args: argparse.Namespace) -> None:
             gen_samples = native.generate(
                 args.games_per_gen, seed=args.seed + generation * args.games_per_gen
             )
+            game_results = native.last_game_results
         else:
             selfplay_mcts = MCTS(
                 best_policy, best_value, device, n_simulations=args.sims, c_puct=args.c_puct
             )
             gen_samples = []
+            game_results = []
             for _ in range(args.games_per_gen):
-                gen_samples.extend(
-                    play_game(
-                        selfplay_mcts,
-                        max_moves=args.max_moves,
-                        temp_moves=args.temp_moves,
-                        temperature=args.temperature,
-                    )
+                game_samples = play_game(
+                    selfplay_mcts,
+                    max_moves=args.max_moves,
+                    temp_moves=args.temp_moves,
+                    temperature=args.temperature,
                 )
+                # Every sample in a game shares the final result (White POV).
+                game_results.append(game_samples[0].value if game_samples else 0.0)
+                gen_samples.extend(game_samples)
+        wins, draws, losses = _wdl(game_results)
         buffer.append(gen_samples)
         del buffer[: -args.buffer_gens]
         train_samples = [s for gen in buffer for s in gen]
@@ -251,10 +300,26 @@ def run_rl(args: argparse.Namespace) -> None:
         candidate_policy = copy.deepcopy(best_policy)
         candidate_value = copy.deepcopy(best_value)
         policy_loss = train_policy_soft(
-            candidate_policy, dataset, args.epochs, args.batch_size, args.lr, device
+            candidate_policy,
+            dataset,
+            args.epochs,
+            args.batch_size,
+            args.lr,
+            device,
+            on_epoch=lambda e, loss: metrics.emit(
+                {"type": "epoch", "phase": "policy", "gen": generation, "epoch": e, "loss": loss}
+            ),
         )
         value_loss = train_value(
-            candidate_value, dataset, args.epochs, args.batch_size, args.lr, device
+            candidate_value,
+            dataset,
+            args.epochs,
+            args.batch_size,
+            args.lr,
+            device,
+            on_epoch=lambda e, loss: metrics.emit(
+                {"type": "epoch", "phase": "value", "gen": generation, "epoch": e, "loss": loss}
+            ),
         )
 
         if args.gate_games > 0:
@@ -299,7 +364,26 @@ def run_rl(args: argparse.Namespace) -> None:
                 ]
             )
 
+        metrics.emit(
+            {
+                "type": "gen",
+                "gen": generation,
+                "samples": len(train_samples),
+                "new_samples": len(gen_samples),
+                "policy_loss": policy_loss,
+                "value_loss": value_loss,
+                "gate_score": None if gate_score != gate_score else gate_score,  # NaN -> null
+                "accepted": bool(accepted),
+                "wins": wins,
+                "draws": draws,
+                "losses": losses,
+            }
+        )
+
+    metrics.emit({"type": "done", "generations": args.generations})
+    metrics.close()
     print(f"done. best RL nets in {_RL_DIR}; metrics in {csv_path}", flush=True)
+    print(f"live metrics stream: {metrics_path}", flush=True)
     print("adopt them for the engine/GUI with: python -m nn.promote", flush=True)
 
 
@@ -354,6 +438,11 @@ def main() -> None:
     )
     parser.add_argument("--seed", type=int, default=0, help="base RNG seed for native self-play")
     parser.add_argument("--out-dir", default=None, help="override the metrics-CSV directory")
+    parser.add_argument(
+        "--metrics-stream",
+        default=None,
+        help="JSONL live-metrics path (default: <out-dir>/<stamp>_rl_training.jsonl)",
+    )
     args = parser.parse_args()
 
     if args.out_dir:

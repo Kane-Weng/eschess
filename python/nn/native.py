@@ -94,6 +94,8 @@ class NativeSelfPlay:
             temp_moves=temp_moves,
             max_moves=max_moves,
         )
+        # White-perspective result of each game in the most recent generate() call.
+        self.last_game_results: list[float] = []
 
     def generate(self, num_games: int, seed: int = 0) -> list:
         """Play 'num_games' games and return their training samples."""
@@ -112,4 +114,6 @@ class NativeSelfPlay:
             start, end = offsets[m], offsets[m + 1]
             target = list(zip(index[start:end], prob[start:end]))
             samples.append(SelfPlaySample(states[m], target, float(value)))
+        # One value per game (White POV result); offsets index samples per game.
+        self.last_game_results = [float(v) for v in values]
         return samples

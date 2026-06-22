@@ -37,8 +37,8 @@
         "A telemetry room streaming a persistent self-play loop: moving averages of " +
         "policy loss, value loss, evolving win/loss ratios, and NPS — graphed in " +
         "real time over a WebSocket while a background server does the training.",
-      href: "#training-dashboard",
-      status: "Planned",
+      href: "/training",
+      status: "Live",
     },
     {
       piece: "♚", // ♚ king

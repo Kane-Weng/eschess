@@ -33,7 +33,8 @@ start uvicorn there and point the frontend at it with
 { "status": "ok", "langs": { "py": true, "cpp": true, "rust": false } }
 ```
 
-The engine lives at the WebSocket endpoint `/ws/engine`.
+The engine lives at the WebSocket endpoint `/ws/engine`. The training-room
+dashboard adds `GET /training/runs` + the `/ws/train` socket (see below).
 
 ## Wire format
 
@@ -63,6 +64,38 @@ server are interchangeable:
 `policy` search is the next step; both already exist in `engine_backend.make_engine`
 and need the trained weights under `python/nn/weights/` plus the engine's NN deps
 (`uv sync --extra web --extra nn` pulls numpy + torch).
+
+## Training room (`/training/runs`, `/ws/train`)
+
+Serves the RL self-play metrics to the frontend training dashboard
+(`/training`). `python -m nn.rl` writes a JSONL metrics stream next to its CSV at
+`harness/results/<stamp>_rl_training.jsonl` (events: `run`, per-epoch `epoch`,
+per-generation `gen` with W/D/L, `done`). The dashboard streams a run two ways:
+
+- **Replay**: page through any recorded run (JSONL, or a legacy CSV projected
+  onto `gen` events), paced server-side by a `speed` (gen/s) the UI sets.
+- **Attach**: tail a JSONL a local trainer is still writing, live.
+
+```jsonc
+// GET /training/runs -> { "runs": [{ "name", "stamp", "format": "jsonl"|"csv" }] }
+
+// client -> /ws/train
+{ "mode": "replay" | "attach", "run": "<name>", "speed": 8 }
+// server -> client
+{ "event": { "type": "gen", "gen": 1, "policy_loss": 2.43, "value_loss": 0.04,
+             "gate_score": 0.5, "accepted": false, "wins": 3, "draws": 2, "losses": 1 } }
+{ "status": "eof" | "error", "detail": "..." }
+```
+
+Produce a live run with, e.g.:
+
+```bash
+cd python && uv run --extra nn python -m nn.rl --generations 5 --games-per-gen 20
+# then pick that run in the dashboard (Replay), or attach to it while it runs.
+```
+
+Override the dashboard's backend URL at build time with
+`PUBLIC_TRAIN_WS` / `PUBLIC_TRAIN_HTTP` (default `:8123`).
 
 ## Status
 

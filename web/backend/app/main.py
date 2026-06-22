@@ -36,6 +36,7 @@ _PYTHON_DIR = _REPO_ROOT / "python"
 if str(_PYTHON_DIR) not in sys.path:
     sys.path.insert(0, str(_PYTHON_DIR))
 
+from app.training import router as training_router  # noqa: E402
 from engine.board import CBoard, Color, PieceType, square_name  # noqa: E402
 from engine_backend import cpp_available, make_engine, rust_available  # noqa: E402
 
@@ -55,6 +56,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Training-room dashboard stream (GET /training/runs, WS /ws/train).
+app.include_router(training_router)
 
 
 def _move_to_uci(move) -> str | None:
