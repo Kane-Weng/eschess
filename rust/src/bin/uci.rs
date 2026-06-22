@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
+use std::time::Instant;
 
 use eschess::board::{CBoard, STARTPOS_FEN};
 use eschess::evaluate::make_evaluator;
@@ -257,7 +258,7 @@ impl UCIEngine {
             } else {
                 4
             };
-            self.go_multipv(depth, white);
+            self.go_multipv(depth, white, time_limit_ms);
             return;
         }
 
@@ -293,30 +294,52 @@ impl UCIEngine {
         );
     }
 
-    fn go_multipv(&mut self, depth: i32, white: bool) {
-        let results = self.search.analyze(&mut self.board, depth);
-        if results.is_empty() {
-            println!("bestmove 0000");
-            return;
+    // Re-run analyze at each depth so the GUI sees the top lines / effort evolve
+    // while thinking (instead of one batch dump at the end). Port of python/uci.py.
+    fn go_multipv(&mut self, depth: i32, white: bool, time_limit_ms: Option<f64>) {
+        let start = Instant::now();
+        let mut total_nodes: i64 = 0;
+        let mut results = Vec::new();
+        for d in 1..=depth {
+            results = self.search.analyze(&mut self.board, d);
+            if results.is_empty() {
+                println!("bestmove 0000");
+                return;
+            }
+            total_nodes += results.iter().map(|r| r.node_count).sum::<i64>();
+            let elapsed = start.elapsed().as_secs_f64();
+            let nps = if elapsed > 0.0 {
+                (total_nodes as f64 / elapsed) as i64
+            } else {
+                0
+            };
+            let k = self.multipv.min(results.len());
+            for (i, r) in results.iter().take(k).enumerate() {
+                let pv_text: Vec<String> = r.pv.iter().map(move_to_uci).collect();
+                println!(
+                    "info multipv {} depth {} score {} nodes {} nps {} time {} pv {}",
+                    i + 1,
+                    d,
+                    score_to_uci(r.score, white, r.pv.len()),
+                    total_nodes,
+                    nps,
+                    (elapsed * 1000.0) as i64,
+                    pv_text.join(" ")
+                );
+            }
+            let effort: Vec<String> = results
+                .iter()
+                .map(|r| format!("{}:{}", move_to_uci(&r.mv), r.node_count))
+                .collect();
+            println!("info string effort {}", effort.join(" "));
+            io::stdout().flush().ok();
+
+            if let Some(limit) = time_limit_ms {
+                if elapsed * 1000.0 >= limit {
+                    break;
+                }
+            }
         }
-        let total_nodes: i64 = results.iter().map(|r| r.node_count).sum();
-        let k = self.multipv.min(results.len());
-        for (i, r) in results.iter().take(k).enumerate() {
-            let pv_text: Vec<String> = r.pv.iter().map(move_to_uci).collect();
-            println!(
-                "info multipv {} depth {} score {} nodes {} pv {}",
-                i + 1,
-                depth,
-                score_to_uci(r.score, white, r.pv.len()),
-                total_nodes,
-                pv_text.join(" ")
-            );
-        }
-        let effort: Vec<String> = results
-            .iter()
-            .map(|r| format!("{}:{}", move_to_uci(&r.mv), r.node_count))
-            .collect();
-        println!("info string effort {}", effort.join(" "));
         println!("bestmove {}", move_to_uci(&results[0].mv));
         io::stdout().flush().ok();
     }

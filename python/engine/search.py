@@ -219,7 +219,9 @@ class Search:
         tt_move: Move | None = None
         if tt_entry is not None:
             tt_move = tt_entry.best_move
-            if tt_entry.depth >= depth:
+            # Never cut off at the root: the root loop must run to populate
+            # _root_info (the GUI MultiPV / density source) and to return a move.
+            if ply > 0 and tt_entry.depth >= depth:
                 if tt_entry.flag == TTFlag.EXACT:
                     return tt_entry.score, tt_entry.best_move
                 elif tt_entry.flag == TTFlag.LOWER:
@@ -414,6 +416,7 @@ class Search:
         self._age_history()  # decay stale scores before each new search
         self._nodes = 0
         self._stop = False
+        self._root_info = []  # drop the previous position's root moves
 
         start = time.time()
         budget = (time_limit_ms / 1000.0) if time_limit_ms else None

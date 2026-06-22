@@ -266,7 +266,7 @@ class UCIEngine {
         bool white = board_.turn == WHITE;
 
         if (multipv_ > 1) {
-            go_multipv(max_depth < MAX_PLY ? max_depth : 4, white);
+            go_multipv(max_depth < MAX_PLY ? max_depth : 4, white, time_limit_ms);
             return;
         }
 
@@ -290,31 +290,44 @@ class UCIEngine {
                   << std::endl;
     }
 
-    void go_multipv(int depth, bool white) {
-        auto results = search_.analyze(board_, depth);
-        if (results.empty()) {
-            std::cout << "bestmove 0000" << std::endl;
-            return;
-        }
+    // Re-run analyze at each depth so the GUI sees the top lines / effort evolve
+    // while thinking (instead of one batch dump at the end). Port of python/uci.py.
+    void go_multipv(int depth, bool white, double time_limit_ms) {
+        auto start = std::chrono::steady_clock::now();
         long total_nodes = 0;
-        for (const auto &r : results) total_nodes += r.node_count;
-
-        int k = std::min<int>(multipv_, static_cast<int>(results.size()));
-        for (int i = 0; i < k; ++i) {
-            const auto &r = results[i];
-            std::string pv_text;
-            for (size_t j = 0; j < r.pv.size(); ++j) {
-                if (j) pv_text += " ";
-                pv_text += move_to_uci(r.pv[j]);
+        std::vector<RootAnalysis> results;
+        for (int d = 1; d <= depth; ++d) {
+            results = search_.analyze(board_, d);
+            if (results.empty()) {
+                std::cout << "bestmove 0000" << std::endl;
+                return;
             }
-            std::cout << "info multipv " << (i + 1) << " depth " << depth << " score "
-                      << score_to_uci(r.score, white, static_cast<int>(r.pv.size())) << " nodes "
-                      << total_nodes << " pv " << pv_text << std::endl;
+            for (const auto &r : results) total_nodes += r.node_count;
+            double elapsed_ms =
+                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start)
+                    .count();
+            long nps = elapsed_ms > 0 ? static_cast<long>(total_nodes / (elapsed_ms / 1000.0)) : 0;
+
+            int k = std::min<int>(multipv_, static_cast<int>(results.size()));
+            for (int i = 0; i < k; ++i) {
+                const auto &r = results[i];
+                std::string pv_text;
+                for (size_t j = 0; j < r.pv.size(); ++j) {
+                    if (j) pv_text += " ";
+                    pv_text += move_to_uci(r.pv[j]);
+                }
+                std::cout << "info multipv " << (i + 1) << " depth " << d << " score "
+                          << score_to_uci(r.score, white, static_cast<int>(r.pv.size()))
+                          << " nodes " << total_nodes << " nps " << nps << " time "
+                          << static_cast<long>(elapsed_ms) << " pv " << pv_text << std::endl;
+            }
+            std::string effort = "info string effort";
+            for (const auto &r : results)
+                effort += " " + move_to_uci(r.move) + ":" + std::to_string(r.node_count);
+            std::cout << effort << std::endl;
+
+            if (time_limit_ms > 0 && elapsed_ms >= time_limit_ms) break;
         }
-        std::string effort = "info string effort";
-        for (const auto &r : results)
-            effort += " " + move_to_uci(r.move) + ":" + std::to_string(r.node_count);
-        std::cout << effort << std::endl;
         std::cout << "bestmove " << move_to_uci(results[0].move) << std::endl;
     }
 };

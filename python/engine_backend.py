@@ -162,10 +162,19 @@ class UCIBackend:
             "stm_white": white,
         }
         multipv_map: dict[int, dict] = {}
+
+        def _publish() -> None:
+            # Snapshot so the GUI (reading from another thread) sees a consistent
+            # frame as the search streams info lines in.
+            snap = dict(info)
+            snap["multipv"] = [multipv_map[i] for i in sorted(multipv_map)]
+            self.last_info = snap
+
         for raw in self._proc.stdout:
             line = raw.strip()
             if line.startswith("info string effort"):
                 info["effort"] = self._parse_effort(line)
+                _publish()
             elif line.startswith("info"):
                 fields, idx = self._parse_info_fields(line, white)
                 if idx is None or idx == 1:  # base telemetry mirrors the best line
@@ -177,9 +186,9 @@ class UCIBackend:
                         "score": fields.get("score"),
                         "pv": pv,
                     }
+                _publish()
             elif line.startswith("bestmove"):
-                info["multipv"] = [multipv_map[i] for i in sorted(multipv_map)]
-                self.last_info = info
+                _publish()
                 token = line.split()[1]
                 return None if token == "0000" else _uci_to_move(token)
         raise RuntimeError(f"UCI engine {self.command!r} closed before 'bestmove'")

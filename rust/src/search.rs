@@ -275,7 +275,9 @@ impl Search {
         let mut tt_move = NULL_MOVE;
         if let Some(entry) = self.tt.probe(key) {
             tt_move = entry.best_move;
-            if entry.depth >= depth {
+            // Never cut off at the root: the root loop must run to populate root_info
+            // (the GUI MultiPV / density source) and to return a move.
+            if ply > 0 && entry.depth >= depth {
                 match entry.flag {
                     TTFlag::Exact => return (entry.score, entry.best_move),
                     TTFlag::Lower => alpha = alpha.max(entry.score),
@@ -443,6 +445,7 @@ impl Search {
         self.age_history();
         self.nodes = 0;
         self.stop = false;
+        self.root_info.clear(); // drop the previous position's root moves
 
         let start = Instant::now();
         let budget_s = time_limit_ms.filter(|&ms| ms > 0.0).map(|ms| ms / 1000.0);

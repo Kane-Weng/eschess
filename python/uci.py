@@ -26,6 +26,7 @@ Run:  python3 uci.py     (or: uv run python uci.py)
 
 import argparse
 import sys
+import time
 
 from engine._generated import MATE_THRESHOLD, MOVE_OVERHEAD_MS, TIME_SAFETY
 from engine.board import STARTPOS_FEN, CBoard, Color, PieceType, name_to_square, square_name
@@ -182,7 +183,7 @@ class UCIEngine:
         max_depth, time_limit_ms = self._plan_time(params)
 
         if self._multipv > 1 and hasattr(self.engine, "analyze"):
-            self._go_multipv(max_depth)
+            self._go_multipv(max_depth, time_limit_ms)
             return
 
         white = self.board.turn == Color.WHITE
@@ -204,24 +205,34 @@ class UCIEngine:
         )
         print(f"bestmove {move_to_uci(best_move) if best_move else '0000'}", flush=True)
 
-    def _go_multipv(self, max_depth: int) -> None:
+    def _go_multipv(self, max_depth: int, time_limit_ms: float | None = None) -> None:
+        """Re-run analyze at each depth so the GUI sees the top lines / effort
+        evolve while thinking (instead of one batch dump at the end)."""
         white = self.board.turn == Color.WHITE
         depth = max_depth if max_depth and max_depth < 64 else 4
-        results = self.engine.analyze(self.board, depth)
-        if not results:
-            print("bestmove 0000", flush=True)
-            return
-        total_nodes = sum(r["nodes"] for r in results)
-        for i, r in enumerate(results[: self._multipv], start=1):
-            pv_text = " ".join(move_to_uci(m) for m in r["pv"])
-            print(
-                f"info multipv {i} depth {depth} "
-                f"score {_score_to_uci(r['score'], white, len(r['pv']))} "
-                f"nodes {total_nodes} pv {pv_text}",
-                flush=True,
-            )
-        effort = " ".join(f"{move_to_uci(r['move'])}:{r['nodes']}" for r in results)
-        print(f"info string effort {effort}", flush=True)
+        start = time.time()
+        total_nodes = 0
+        results: list = []
+        for d in range(1, depth + 1):
+            results = self.engine.analyze(self.board, d)
+            if not results:
+                print("bestmove 0000", flush=True)
+                return
+            total_nodes += sum(r["nodes"] for r in results)
+            elapsed = time.time() - start
+            nps = int(total_nodes / elapsed) if elapsed > 0 else 0
+            for i, r in enumerate(results[: self._multipv], start=1):
+                pv_text = " ".join(move_to_uci(m) for m in r["pv"])
+                print(
+                    f"info multipv {i} depth {d} "
+                    f"score {_score_to_uci(r['score'], white, len(r['pv']))} "
+                    f"nodes {total_nodes} nps {nps} time {int(elapsed * 1000)} pv {pv_text}",
+                    flush=True,
+                )
+            effort = " ".join(f"{move_to_uci(r['move'])}:{r['nodes']}" for r in results)
+            print(f"info string effort {effort}", flush=True)
+            if time_limit_ms and elapsed * 1000 >= time_limit_ms:
+                break
         print(f"bestmove {move_to_uci(results[0]['move'])}", flush=True)
 
     def _go_policy(self) -> None:

@@ -160,7 +160,9 @@ std::pair<double, Move> Search::minimax(CBoard &board, int depth, double alpha, 
     Move tt_move = NULL_MOVE;
     if (tt_entry) {
         tt_move = tt_entry->best_move;
-        if (tt_entry->depth >= depth) {
+        // Never cut off at the root: the root loop must run to populate root_info_
+        // (the GUI MultiPV / density source) and to return a move.
+        if (ply > 0 && tt_entry->depth >= depth) {
             if (tt_entry->flag == TTFlag::EXACT)
                 return {tt_entry->score, tt_entry->best_move};
             else if (tt_entry->flag == TTFlag::LOWER)
@@ -293,6 +295,7 @@ std::pair<Move, double> Search::search_position(CBoard &board, int max_depth, do
     age_history();
     nodes_ = 0;
     stop_ = false;
+    root_info_.clear();  // drop the previous position's root moves
 
     auto start = std::chrono::steady_clock::now();
     bool has_budget = time_limit_ms > 0.0;
