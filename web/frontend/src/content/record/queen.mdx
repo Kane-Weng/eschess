@@ -4,19 +4,312 @@ piece: "♛"
 pieceName: "Queen"
 title: "The Spectacle"
 theme: "The most powerful, visible element on the board."
-summary: "The visual layer — turning a plain pygame GUI into an interactive sandbox that renders node-pruning trees, fading unsearched branches, and neural attention heatmaps."
-draft: true
+summary: "The visual layer: a pygame sandbox and an Astro/Svelte showcase that render the same engine telemetry as search arrows, ranked candidate moves, effort clouds, and an eval bar."
+draft: false
 ---
 
-The queen is the most powerful and most visible piece on the board. This chapter is the
-project's visual layer — how the engine's thinking is made into something you can watch.
+import SearchOverlay from "../../components/SearchOverlay.svelte";
+import CodeReveal from "../../components/CodeReveal.astro";
+import CodeTabs from "../../components/CodeTabs.astro";
 
-## Making thought visible
+export const layoutCode = `# Layout: [eval bar][board][right menu]; status bar + scrollable move
+# list sit below the board, spanning the eval bar + board width.
+EVAL_BAR_W = 26
+BOARD_ORIGIN_X = EVAL_BAR_W
+MENU_W = 300
+MENU_X = BOARD_ORIGIN_X + BOARD_PX
+WINDOW_W = EVAL_BAR_W + BOARD_PX + MENU_W
+WINDOW_H = 880`;
 
-It covers turning a plain **pygame GUI** into an interactive sandbox: rendering the
-search as a **node-pruning tree** with beta-cutoffs highlighted and unsearched paths
-fading away, and projecting **neural attention heatmaps** straight onto the board.
+export const threadCode = `def _start_engine(apply: bool):
+    """Run the engine on the current position in a daemon thread. apply=True
+    plays the result; apply=False only refreshes the overlay telemetry."""
+    if bot["thinking"] or board.game_over:
+        return
+    bot["thinking"] = True
+    board_copy = copy.deepcopy(board)
 
-> *Coming soon:* an interactive pruning-tree visualizer you can step through.
+    def _run():
+        bot["move"] = engine.get_best_move(board_copy, depth, time_limit)
+        bot["thinking"] = False
 
-This chapter is still being written.
+    # Daemon thread: the 60fps render loop keeps reading engine.last_info
+    # while the search runs, so the arrows update as the engine thinks.
+    threading.Thread(target=_run, daemon=True).start()`;
+
+export const telemetryCode = `def _serialize_info(info: dict, stm_white: bool) -> dict:
+    """Project the Python engine's last_info onto the frontend EngineInfo shape."""
+    return {
+        "nodes": info.get("nodes", 0),
+        "nps": info.get("nps", 0),
+        "score": info.get("score"),
+        "depth": info.get("depth", 0),
+        "pv": [_move_to_obj(m) for m in info.get("pv", [])],         # best line
+        "multipv": [                                                  # top-3 roots
+            {"move": _move_to_obj(e.get("move")), "score": e.get("score"),
+             "pv": [_move_to_obj(m) for m in e.get("pv", [])]}
+            for e in info.get("multipv", [])
+        ],
+        "effort": {_move_to_uci(m): n for m, n in info.get("effort", {}).items()},
+        "stmWhite": stm_white,
+    }`;
+
+export const pvPyCode = `def draw_search_arrows(screen, pv):
+    """PV as arrows: one color per side, deeper plies fainter. Ply 0 is the
+    side that searched; the first two plies get thicker shafts."""
+    overlay = pygame.Surface((MENU_X, BOARD_PX), pygame.SRCALPHA)
+    for i, move in enumerate(pv):
+        base = ARROW_BOT_SIDE if i % 2 == 0 else ARROW_PLAYER_SIDE
+        alpha = max(45, 230 - i * 26)
+        width = 11 if i < 2 else 7
+        _draw_arrow(overlay, sq_center(move[0]), sq_center(move[1]),
+                    (*base, alpha), width=width,
+                    elbow=_knight_elbow(move[0], move[1]))
+    screen.blit(overlay, (0, 0))`;
+
+export const pvTsCode = `const pvArrows = $derived.by<Arrow[]>(() => {
+  if (vizMode !== "pv") return [];
+  return info.pv.slice(0, 8).map((m, i) => {
+    const base = i % 2 === 0 ? ARROW_BOT : ARROW_OPP;     // orange / cyan
+    const alpha = Math.max(0.18, 0.9 - i * 0.1);          // fade with depth
+    return arrow(m.from, m.to, \`rgba(\${base},\${alpha})\`, i < 2 ? 0.16 : 0.1);
+  });
+});`;
+
+export const arrowHelperCode = `def _draw_arrow(surface, start, end, color, width=7, elbow=None):
+    """Arrow from start to end on an alpha surface. Knight moves pass an elbow
+    so the shaft bends in an L instead of cutting across the board."""
+    pts = [start, elbow, end] if elbow is not None else [start, end]
+    tail, tip = pts[-2], pts[-1]
+    dx, dy = tip[0] - tail[0], tip[1] - tail[1]
+    dist = math.hypot(dx, dy)
+    ux, uy = dx / dist, dy / dist
+    head_len, head_w = 20, 7 + width
+    base = (tip[0] - ux * head_len, tip[1] - uy * head_len)
+    pygame.draw.lines(surface, color, False, pts[:-1] + [base], width)   # shaft
+    perp = (-uy, ux)                                                      # arrowhead
+    left = (base[0] + perp[0] * head_w, base[1] + perp[1] * head_w)
+    right = (base[0] - perp[0] * head_w, base[1] - perp[1] * head_w)
+    pygame.draw.polygon(surface, color, [tip, left, right])`;
+
+export const top3Code = `def draw_top3_arrows(screen, multipv, stm_white):
+    """Top-3 root moves as rank-colored arrows (green=best, gold=alt, red=worst)
+    with a centipawn label; each move's reply chain is drawn thin and faint."""
+    for rank, entry in enumerate(multipv[:3]):
+        color = ARROW_RANK[rank]
+        pv = entry.get("pv") or [entry["move"]]
+        for j, move in enumerate(pv[1:4], start=1):              # faint reply chain
+            _draw_arrow(overlay, sq_center(move[0]), sq_center(move[1]),
+                        (*color, max(35, 120 - j * 25)), width=4)
+        root = pv[0]                                             # bold root on top
+        _draw_arrow(overlay, sq_center(root[0]), sq_center(root[1]),
+                    (*color, 235), width=11)
+        labels.append((sq_center(root[1]), _cp_label(entry["score"], stm_white), color))`;
+
+export const densityCode = `def draw_density_cloud(screen, effort):
+    """A ring on each candidate's destination square, sized and opaque by how many
+    nodes the engine spent in that move's subtree: where it found the position sharp."""
+    by_square = {}
+    for move, nodes in effort.items():                  # several moves can share a square
+        by_square[move[1]] = by_square.get(move[1], 0) + nodes
+    peak = max(by_square.values()) or 1
+    for sq, nodes in by_square.items():
+        norm = max(0.0, min(1.0, nodes / peak))         # 0..1 relative to the busiest square
+        radius = int(12 + norm * (SQUARE_SIZE // 2 - 6))
+        alpha = min(255, int(40 + norm * 150))
+        pygame.draw.circle(overlay, (*DENSITY_COLOR, alpha), sq_center(sq), radius)`;
+
+export const evalCode = `def score_to_white_fraction(score_pawns: float) -> float:
+    """Pawn advantage (White POV) -> White's fill fraction, 0.5 at even.
+    tanh squashes a runaway +9 down so the bar stays readable near the middle."""
+    return 0.5 + 0.5 * math.tanh(score_pawns / 4.0)`;
+
+The queen is the most powerful and most visible piece on the board. The earlier
+chapters built an engine that thinks in bitboards and alpha-beta windows; numbers
+that mean nothing until you can see them. This chapter is the visual layer: two
+front-ends that take the engine's raw output and turn it into something you can
+watch move.
+
+There are two of them, and they are deliberately built around the same idea. A
+native **pygame sandbox** for development, and a public **Astro + Svelte showcase**
+for the web. Before the pictures, it's worth seeing how each is put together,
+because the second half of the chapter only works because they agree on one thing.
+
+## The pygame sandbox
+
+`python/main.py` is a single window split into three columns: a thin eval bar on
+the left, the 8x8 board in the middle, and a settings panel on the right. A status
+strip and a scrollable move list run underneath. Every pixel is positioned off a
+handful of constants, so the whole layout shifts together if one changes.
+
+<CodeReveal
+  concept="Window layout"
+  summary="The board sits at a fixed offset; the eval bar, menu, status bar, and move list are all measured from it."
+  source="python/main.py"
+  code={layoutCode}
+/>
+
+The important design choice is threading. A depth-5 search can take a second or
+two, and pygame redraws at 60 fps. If the search ran on the main loop, the window
+would freeze on every move. Instead the search runs on a daemon thread that writes
+its progress into `engine.last_info`, and the render loop reads that dict every
+frame. The arrows you see are never a finished result being painted once; they are
+whatever the engine believed on the frame it was drawn.
+
+<CodeReveal
+  concept="Search off the render thread"
+  summary="A daemon thread mutates a shared dict; the 60fps loop reads it. The same entry point serves a real move (apply) and a telemetry-only Re-evaluate."
+  source="python/main.py · main._start_engine"
+  code={threadCode}
+/>
+
+That split is what makes the sandbox a sandbox rather than a game. The right panel
+edits the live engine: language (Python / C++ / Rust), search (alpha-beta or the
+policy net), eval tier, depth, and a per-move time budget. There is a **Re-evaluate**
+button to re-run the overlays on a position you stepped back to, and a **Force move**
+button that cuts the search off early and falls back to the best line from the last
+completed depth, which iterative deepening always has on hand.
+
+## The web showcase
+
+The web side lives in `web/`. The frontend is **Astro** (static-first, so the pages
+ship as plain HTML) with **Svelte** islands for anything interactive and **Tailwind**
+for styling. This chapter you are reading is one of those pages: MDX prose with live
+widgets dropped straight into the text.
+
+The catch is that a chess engine is not free to run. The web showcase solves it in
+two directions:
+
+1. The C++ and Rust ports compile to **WebAssembly** and run the alpha-beta search
+   directly in your browser, with a TypeScript port of the same engine as the
+   pure-JS fallback.
+2. The Python and neural-net engine cannot run client-side, so it sits behind a
+   **FastAPI + WebSocket** server. The browser sends a position, the server streams
+   back the move and telemetry.
+
+Both paths answer in the exact same wire format, so the front-end never knows or
+cares which one it is talking to.
+
+## One telemetry, two renderers
+
+Here is the thing that ties the chapter together. The pygame GUI and the web board
+are not two implementations of "draw a chess engine thinking." They are two
+renderers of one data shape.
+
+The engine, whatever the language, exposes a single telemetry record after each
+search: node count, nodes-per-second, score, depth, the principal variation, the
+top-3 root moves, and a per-move effort map. The backend's only job is to reshape
+that into the `EngineInfo` object the browser already expects.
+
+<CodeReveal
+  concept="The shared telemetry shape"
+  summary="last_info from the Python engine, projected onto the EngineInfo object the WebAssembly and TypeScript engines also emit. One shape, three producers."
+  source="web/backend/app/main.py · _serialize_info"
+  code={telemetryCode}
+/>
+
+Because the data is identical, the drawing code can be too. The web board's overlay
+layer (`Chessboard.svelte`) is a near-line-for-line port of the pygame draw
+functions: same colors, same depth-fade, same knight-elbow geometry. Put the two
+side by side and the only differences are the language and the coordinate units.
+
+<CodeTabs
+  items={[
+    {
+      concept: "pygame (Python)",
+      summary: "Build one arrow per PV ply: alternate the color by side, fade the alpha with depth, fatten the first two plies.",
+      source: "python/main.py · draw_search_arrows",
+      code: pvPyCode,
+      lang: "python",
+    },
+    {
+      concept: "web (TypeScript)",
+      summary: "The same loop in Svelte. info.pv is the same list of moves; the constants and the fade are copied across verbatim.",
+      source: "web/frontend/.../Chessboard.svelte",
+      code: pvTsCode,
+      lang: "typescript",
+    },
+  ]}
+/>
+
+So everything below is one set of ideas, drawn twice. The widget is the web port;
+the code panels are the pygame original it was copied from.
+
+## Drawing the search
+
+The board below is frozen on a Giuoco Piano, White to move, with one search's
+telemetry baked in. The position never changes; the buttons only change which layer
+of that telemetry gets drawn on top of it. Step through them.
+
+<SearchOverlay client:visible />
+
+Three overlays, three questions about the same search.
+
+**The PV line** answers "what does the engine expect to happen?" It draws the
+principal variation as a chain of arrows, alternating color by side and fading with
+depth, so the immediate move is loud and the deep continuation is a whisper. Knight
+moves bend in an L rather than slicing diagonally across the board, which is a small
+touch handled entirely inside the arrow helper.
+
+**Top 3** answers "what were the alternatives?" It draws the three best root moves
+ranked by color (green, gold, red) with each move's score stamped on its target
+square, and a faint reply chain trailing behind. This is the MultiPV output: the
+same search, asked to keep its three best lines instead of just one.
+
+**Density** answers "where was the position hard?" Every candidate move carries a
+node count, how much of the search budget the engine poured into it. Drawn as rings
+sized and brightened by that count, the busy squares glow. Quiet squares barely
+register. It is a heatmap of the engine's attention.
+
+<CodeTabs
+  items={[
+    {
+      concept: "Arrow + elbow",
+      summary: "The shared primitive: a shaft plus a polygon arrowhead. An optional elbow point makes a knight's move bend in an L.",
+      source: "python/main.py · _draw_arrow",
+      code: arrowHelperCode,
+    },
+    {
+      concept: "PV line",
+      summary: "The principal variation, one arrow per ply, color by side and alpha by depth.",
+      source: "python/main.py · draw_search_arrows",
+      code: pvPyCode,
+    },
+    {
+      concept: "Top 3",
+      summary: "MultiPV root moves, rank-colored, each with a centipawn label and a faint reply chain.",
+      source: "python/main.py · draw_top3_arrows",
+      code: top3Code,
+    },
+    {
+      concept: "Density",
+      summary: "Effort per destination square, normalized against the busiest square and drawn as graded rings.",
+      source: "python/main.py · draw_density_cloud",
+      code: densityCode,
+    },
+  ]}
+/>
+
+## The evaluation bar
+
+The thin column on the left of the board is the one number that never goes away: who
+is winning. In the sandbox it prefers an objective oracle, querying a local
+Stockfish on a background thread when one is on PATH, and falls back to the playing
+engine's own score otherwise. Either way the value is a pawn advantage, and a raw
+pawn count is a bad fill fraction: a +9 position would peg the bar to the top and
+flatten every interesting swing near equality.
+
+A `tanh` curve fixes that. It is steep near zero, where small advantages matter, and
+saturates gently as the score runs away, so the bar stays readable whether the game
+is balanced or already decided.
+
+<CodeReveal
+  concept="Squashing the score onto the bar"
+  summary="tanh maps an unbounded pawn advantage onto White's 0..1 share of the bar, with the most resolution where the game is close."
+  source="python/eval_probe.py · score_to_white_fraction"
+  code={evalCode}
+/>
+
+None of this changes how the engine plays. The queen does not win games by being
+powerful; she wins them by being seen. Every overlay here is the same search the
+earlier chapters built, finally rendered in a form where you can watch it decide.
