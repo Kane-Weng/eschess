@@ -1,0 +1,29 @@
+__pycache__/
+.venv/
+.vscode/
+.pytest_cache/
+.ruff_cache/
+*.so
+
+# data, models, run output
+data/
+runs/
+*weights/
+*.pgn
+*.pt
+
+# secrets
+.env
+
+# local only
+*_local/
+CLAUDE.md
+TASKS.md
+
+# build leftovers from main checkout
+build/
+target/
+node_modules/
+.astro/
+dist/
+harness/results/
